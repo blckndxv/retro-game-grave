@@ -91,10 +91,41 @@ def translate_text(text):
         translated = data.get("responseData", {}).get("translatedText", "")
         translated = html.unescape(translated).strip()
 
-        if translated and translated.upper() != "MYMEMORY WARNING":
+        if translated and translated != text:
+            print(f"MyMemory: OK — {text}")
             return translated
+
+        print(f"MyMemory: не перевёл — {text}")
     except Exception as error:
-        print(f"Перевод MyMemory не сработал: {error}")
+        print(f"MyMemory: ошибка — {error}")
+
+    try:
+        response = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": "ru",
+                "dt": "t",
+                "q": text,
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        data = response.json()
+        translated = "".join(
+            part[0]
+            for part in data[0]
+            if part and part[0]
+        ).strip()
+
+        if translated:
+            print(f"Google Translate: OK — {text}")
+            return translated
+
+        print(f"Google Translate: пустой ответ — {text}")
+    except Exception as error:
+        print(f"Google Translate: ошибка — {error}")
 
     print(f"Перевод не выполнен, отправляю оригинал: {text}")
     return text
