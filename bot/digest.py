@@ -166,16 +166,24 @@ def collect_new_items(sent_links):
                         image_url = enclosure.get("href")
                         break
 
+            published = entry.get("published_parsed")
+
             new_items.append(
                 {
                     "source": source_name,
                     "title": title,
                     "link": link,
                     "image_url": image_url,
+                    "published": published,
                 }
             )
 
-    return new_items
+    new_items.sort(
+        key=lambda item: item["published"] or (0, 0, 0, 0, 0, 0, 0, 0, 0),
+        reverse=True,
+    )
+
+    return new_items[:10]
 
 
 def build_message(items):
