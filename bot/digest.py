@@ -78,24 +78,26 @@ def translate_text(text):
         return text
 
     try:
-        params = {
-            "client": "gtx",
-            "sl": "auto",
-            "tl": "ru",
-            "dt": "t",
-            "q": text,
-        }
         response = requests.get(
-            "https://translate.googleapis.com/translate_a/single",
-            params=params,
+            "https://api.mymemory.translated.net/get",
+            params={
+                "q": text,
+                "langpair": "en|ru",
+            },
             timeout=20,
         )
         response.raise_for_status()
         data = response.json()
-        translated = "".join(part[0] for part in data[0] if part and part[0])
-        return translated.strip() or text
-    except Exception:
-        return text
+        translated = data.get("responseData", {}).get("translatedText", "")
+        translated = html.unescape(translated).strip()
+
+        if translated and translated.upper() != "MYMEMORY WARNING":
+            return translated
+    except Exception as error:
+        print(f"Перевод MyMemory не сработал: {error}")
+
+    print(f"Перевод не выполнен, отправляю оригинал: {text}")
+    return text
 
 
 def collect_new_items(sent_links):
