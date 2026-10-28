@@ -157,8 +157,12 @@ def build_message(items):
         source = html.escape(item["source"])
 
         lines.append(
-            f'• <a href="{safe_link}">{safe_title}</a> — {source}'
+            f'• <a href="{safe_link}">{safe_title}</a>\n{source}'
         )
+        lines.append("")
+
+    while lines and lines[-1] == "":
+        lines.pop()
 
     return "\n".join(lines)
 
@@ -265,29 +269,27 @@ def build_collage(items):
 def send_digest(chat_id, message):
     build_collage(current_items)
 
+    caption = message
+
+    while len(caption) > 1024 and len(current_items) > 1:
+        current_items.pop()
+        caption = build_message(current_items)
+
+    if len(caption) > 1024:
+        caption = caption[:1021].rstrip() + "..."
+
     with open(COLLAGE_FILE, "rb") as photo:
         response = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
             data={
                 "chat_id": chat_id,
-                "caption": "<b>Retro Game Grave</b>\nКаждое утро в 8:00",
+                "caption": caption,
                 "parse_mode": "HTML",
             },
             files={"photo": photo},
             timeout=60,
         )
-    response.raise_for_status()
 
-    response = requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        json={
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        },
-        timeout=30,
-    )
     response.raise_for_status()
 
 
