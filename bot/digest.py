@@ -148,15 +148,19 @@ def collect_new_items(sent_links):
 
 
 def build_message(items):
-    lines = ["Retro Game Grave", ""]
+    lines = ["<b>Retro Game Grave</b>", ""]
 
     for item in items:
         russian_title = translate_text(item["title"])
-        lines.append(f"• {russian_title}")
-        lines.append(f"{item['link']}")
-        lines.append("")
+        safe_title = html.escape(russian_title)
+        safe_link = html.escape(item["link"], quote=True)
+        source = html.escape(item["source"])
 
-    return "\n".join(lines).strip()
+        lines.append(
+            f'• <a href="{safe_link}">{safe_title}</a> — {source}'
+        )
+
+    return "\n".join(lines)
 
 
 def download_image(url):
@@ -266,13 +270,24 @@ def send_digest(chat_id, message):
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
             data={
                 "chat_id": chat_id,
-                "caption": message[:1024],
-                "parse_mode": "",
+                "caption": "<b>Retro Game Grave</b>\nКаждое утро в 8:00",
+                "parse_mode": "HTML",
             },
             files={"photo": photo},
             timeout=60,
         )
+    response.raise_for_status()
 
+    response = requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
+        timeout=30,
+    )
     response.raise_for_status()
 
 
