@@ -54,7 +54,16 @@ def commit_state():
     subprocess.run(["git", "push"], check=True)
 
 
+CHAT_ID_FILE = "bot/chat_id.txt"
+
+
 def get_chat_id():
+    if os.path.exists(CHAT_ID_FILE):
+        with open(CHAT_ID_FILE, "r", encoding="utf-8") as file:
+            chat_id = file.read().strip()
+            if chat_id:
+                return chat_id
+
     response = requests.get(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
         timeout=30,
@@ -65,11 +74,18 @@ def get_chat_id():
     for update in reversed(updates):
         message = update.get("message") or update.get("channel_post")
         if message:
-            return message["chat"]["id"]
+            chat_id = str(message["chat"]["id"])
+
+            os.makedirs(os.path.dirname(CHAT_ID_FILE), exist_ok=True)
+            with open(CHAT_ID_FILE, "w", encoding="utf-8") as file:
+                file.write(chat_id)
+
+            return chat_id
 
     raise RuntimeError(
         "Не удалось определить chat_id. "
-        "Открой @RetroGameGraveNewsBot в Telegram и нажми Start."
+        "Открой @RetroGameGraveNewsBot в Telegram, отправь /start "
+        "и запусти workflow ещё раз."
     )
 
 
@@ -364,7 +380,7 @@ def main():
     sent_links.update(item["link"] for item in current_items)
     save_state(sent_links)
     commit_state()
-
+subprocess.run(["git", "add", STATE_FILE, CHAT_ID_FILE], check=True)
 
 if __name__ == "__main__":
     main()
