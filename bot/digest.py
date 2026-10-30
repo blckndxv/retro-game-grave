@@ -382,7 +382,7 @@ def main():
     sent_links.update(item["link"] for item in current_items)
     save_state(sent_links)
     commit_state()
-subprocess.run(["git", "add", STATE_FILE, CHAT_ID_FILE], check=True)
+subprocess.run(["git", "add", "bot"], check=True)
 
 if __name__ == "__main__":
     main()
