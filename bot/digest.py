@@ -1,11 +1,8 @@
-import base64
 import html
 import io
 import json
 import os
-import re
 import subprocess
-import urllib.parse
 
 import feedparser
 import requests
@@ -70,7 +67,10 @@ def get_chat_id():
         if message:
             return message["chat"]["id"]
 
-    raise RuntimeError("Не удалось определить chat_id.")
+    raise RuntimeError(
+        "Не удалось определить chat_id. "
+        "Открой @RetroGameGraveNewsBot в Telegram и нажми Start."
+    )
 
 
 def translate_text(text):
@@ -92,7 +92,7 @@ def translate_text(text):
         translated = html.unescape(translated).strip()
 
         if translated and translated != text:
-            print(f"MyMemory: OK — {text}")
+            print(f"MyMemory: OK — {translated}")
             return translated
 
         print(f"MyMemory: не перевёл — {text}")
@@ -120,7 +120,7 @@ def translate_text(text):
         ).strip()
 
         if translated:
-            print(f"Google Translate: OK — {text}")
+            print(f"Google Translate: OK — {translated}")
             return translated
 
         print(f"Google Translate: пустой ответ — {text}")
@@ -212,7 +212,8 @@ def download_image(url):
         response.raise_for_status()
         image = Image.open(io.BytesIO(response.content)).convert("RGB")
         return image
-    except Exception:
+    except Exception as error:
+        print(f"Не удалось скачать изображение: {error}")
         return None
 
 
@@ -258,7 +259,12 @@ def build_collage(items):
 
     draw.text((80, 70), "Retro Game Grave", font=title_font, fill="white")
     draw.text((80, 185), "Каждое утро в 8:00", font=subtitle_font, fill=cyan)
-    draw.text((80, 240), "Retro Handhelds + Retro Dodo", font=subtitle_font, fill=(190, 190, 200))
+    draw.text(
+        (80, 240),
+        "Retro Handhelds + Retro Dodo",
+        font=subtitle_font,
+        fill=(190, 190, 200),
+    )
 
     images = []
 
@@ -281,7 +287,12 @@ def build_collage(items):
     else:
         card_width = 500
         card_height = 380
-        positions = [(80, 360), (620, 360), (80, 790), (620, 790)]
+        positions = [
+            (80, 360),
+            (620, 360),
+            (80, 790),
+            (620, 790),
+        ]
 
         for index, (item, image) in enumerate(images):
             x, y = positions[index]
@@ -292,8 +303,12 @@ def build_collage(items):
                 outline=accent,
                 width=4,
             )
-            label = item["source"]
-            draw.text((x + 16, y + card_height - 48), label, font=label_font, fill="white")
+            draw.text(
+                (x + 16, y + card_height - 48),
+                item["source"],
+                font=label_font,
+                fill="white",
+            )
 
     draw.text(
         (80, 1330),
