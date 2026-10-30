@@ -37,7 +37,8 @@ def save_state(sent_links):
 def commit_state():
     subprocess.run(["git", "config", "user.name", GIT_NAME], check=True)
     subprocess.run(["git", "config", "user.email", GIT_EMAIL], check=True)
-    subprocess.run(["git", "add", STATE_FILE], check=True)
+
+    subprocess.run(["git", "add", "bot"], check=True)
 
     result = subprocess.run(
         ["git", "diff", "--cached", "--quiet"],
@@ -45,10 +46,11 @@ def commit_state():
     )
 
     if result.returncode == 0:
+        print("Изменений для сохранения нет.")
         return
 
     subprocess.run(
-        ["git", "commit", "-m", "Update sent links"],
+        ["git", "commit", "-m", "Update digest state"],
         check=True,
     )
     subprocess.run(["git", "push"], check=True)
