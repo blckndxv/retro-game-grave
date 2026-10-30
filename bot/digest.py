@@ -14,6 +14,7 @@ FEEDS = [
 ]
 
 STATE_FILE = "bot/sent_links.json"
+CHAT_ID_FILE = "bot/chat_id.txt"
 COLLAGE_FILE = "bot/collage.png"
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -29,7 +30,6 @@ def load_state():
 
 
 def save_state(sent_links):
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as file:
         json.dump(sorted(sent_links), file, ensure_ascii=False, indent=2)
 
@@ -56,9 +56,6 @@ def commit_state():
     subprocess.run(["git", "push"], check=True)
 
 
-CHAT_ID_FILE = "bot/chat_id.txt"
-
-
 def get_chat_id():
     if os.path.exists(CHAT_ID_FILE):
         with open(CHAT_ID_FILE, "r", encoding="utf-8") as file:
@@ -78,7 +75,6 @@ def get_chat_id():
         if message:
             chat_id = str(message["chat"]["id"])
 
-            os.makedirs(os.path.dirname(CHAT_ID_FILE), exist_ok=True)
             with open(CHAT_ID_FILE, "w", encoding="utf-8") as file:
                 file.write(chat_id)
 
@@ -382,7 +378,7 @@ def main():
     sent_links.update(item["link"] for item in current_items)
     save_state(sent_links)
     commit_state()
-subprocess.run(["git", "add", "bot"], check=True)
+
 
 if __name__ == "__main__":
     main()
