@@ -93,6 +93,34 @@ def translate_text(text):
 
     try:
         response = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": "ru",
+                "dt": "t",
+                "q": text,
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        data = response.json()
+        translated = "".join(
+            part[0]
+            for part in data[0]
+            if part and part[0]
+        ).strip()
+
+        if translated and translated != text:
+            print(f"Google Translate: OK — {translated}")
+            return translated
+
+        print(f"Google Translate: не перевёл — {text}")
+    except Exception as error:
+        print(f"Google Translate: ошибка — {error}")
+
+    try:
+        response = requests.get(
             "https://api.mymemory.translated.net/get",
             params={
                 "q": text,
@@ -112,34 +140,6 @@ def translate_text(text):
         print(f"MyMemory: не перевёл — {text}")
     except Exception as error:
         print(f"MyMemory: ошибка — {error}")
-
-    try:
-        response = requests.get(
-            "https://translate.googleapis.com/translate_a/single",
-            params={
-                "client": "gtx",
-                "sl": "auto",
-                "tl": "ru",
-                "dt": "t",
-                "q": text,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        data = response.json()
-        translated = "".join(
-            part[0]
-            for part in data[0]
-            if part and part[0]
-        ).strip()
-
-        if translated:
-            print(f"Google Translate: OK — {translated}")
-            return translated
-
-        print(f"Google Translate: пустой ответ — {text}")
-    except Exception as error:
-        print(f"Google Translate: ошибка — {error}")
 
     print(f"Перевод не выполнен, отправляю оригинал: {text}")
     return text
@@ -272,7 +272,6 @@ def build_collage(items):
     footer_font = load_font(34)
 
     draw.text((80, 70), "Retro Game Grave", font=title_font, fill="white")
-    draw.text((80, 185), "Каждое утро в 8:00", font=subtitle_font, fill=cyan)
     draw.text(
         (80, 240),
         "Retro Handhelds + Retro Dodo",
