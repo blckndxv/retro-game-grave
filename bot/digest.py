@@ -4,10 +4,12 @@ import io
 import json
 import os
 import random
+import re
 import subprocess
 
 import feedparser
 import requests
+import trafilatura
 from gtts import gTTS
 from PIL import Image, ImageDraw, ImageFont
 from pydub import AudioSegment
@@ -154,6 +156,78 @@ def translate_text(text):
     return text
 
 
+def clean_text(text):
+    text = html.unescape(text or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def fetch_article_text(url):
+    try:
+        downloaded = trafilatura.fetch_url(url)
+
+        if not downloaded:
+            return ""
+
+        article = trafilatura.extract(downloaded)
+
+        if not article:
+            return ""
+
+        return clean_text(article)
+    except Exception as error:
+        print(f"Не удалось извлечь текст статьи {url}: {error}")
+        return ""
+
+
+def translate_chunk(text):
+    response = requests.get(
+        "https://translate.googleapis.com/translate_a/single",
+        params={
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "ru",
+            "dt": "t",
+            "q": text,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    return "".join(
+        part[0]
+        for part in data[0]
+        if part and part[0]
+    ).strip()
+
+
+def translate_long_text(text):
+    if not text:
+        return ""
+
+    chunks = []
+
+    while text:
+        chunks.append(text[:4000])
+        text = text[4000:]
+
+    translated_parts = []
+
+    for index, chunk in enumerate(chunks, start=1):
+        try:
+            translated = translate_chunk(chunk)
+
+            if translated:
+                translated_parts.append(translated)
+                print(f"Перевод части {index}: OK")
+        except Exception as error:
+            print(f"Перевод части {index}: ошибка — {error}")
+
+    return " ".join(translated_parts).strip()
+
+
 def collect_new_items(sent_links):
     new_items = []
 
@@ -232,14 +306,30 @@ def build_message(items):
 def build_audio_text(items):
     lines = [
         "Привет! Это аудиоверсия Retro Game Grave.",
-        "Главные новости дня:",
+        "Сегодня в выпуске:",
     ]
 
     for index, item in enumerate(items[:3], start=1):
         title = translate_text(item["title"])
+        article = fetch_article_text(item["link"])
+
+        if article:
+            article = article[:2500].strip()
+            article_ru = translate_long_text(article)
+        else:
+            article_ru = ""
+
         lines.append(f"Новость номер {index}: {title}.")
 
-    lines.append("Полный дайджест и ссылки — в сообщении выше.")
+        if article_ru:
+            lines.append(article_ru)
+        else:
+            lines.append(
+                "Подробный текст этой новости пока не удалось получить. "
+                "Ссылка на оригинал есть в текстовом дайджесте."
+            )
+
+    lines.append("Это были главные новости Retro Game Grave.")
     return " ".join(lines)
 
 
@@ -263,13 +353,6 @@ def create_audio(text):
     background_files = [
         file
         for file in glob.glob(os.path.join(AUDIO_FOLDER, "*.mp3"))
-        if os.path.basename(file) != "background_1.mp3"
-        or True
-    ]
-
-    background_files = [
-        file
-        for file in background_files
         if os.path.basename(file)
         not in ("voice_raw.mp3", "voice_fast.mp3", "digest.mp3")
     ]
@@ -361,7 +444,6 @@ def build_collage(items):
     width, height = 1200, 1500
     background = (18, 18, 22)
     accent = (150, 90, 255)
-    cyan = (60, 210, 220)
 
     canvas = Image.new("RGB", (width, height), background)
     draw = ImageDraw.Draw(canvas)
