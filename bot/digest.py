@@ -10,6 +10,7 @@ import subprocess
 import feedparser
 import requests
 import trafilatura
+from bs4 import BeautifulSoup
 from gtts import gTTS
 from PIL import Image, ImageDraw, ImageFont
 from pydub import AudioSegment
@@ -183,23 +184,77 @@ def fetch_article_text(url):
     try:
         downloaded = trafilatura.fetch_url(url)
 
-        if not downloaded:
-            print(f"Страница не скачалась: {url}")
-            return ""
+        if downloaded:
+            article = trafilatura.extract(
+                downloaded,
+                url=url,
+                favor_recall=True,
+                include_comments=False,
+                include_tables=False,
+            )
 
-        article = trafilatura.extract(
-            downloaded,
-            url=url,
-            favor_recall=True,
-            include_comments=False,
-            include_tables=False,
+            if article:
+                print(f"Текст получен через trafilatura: {url}")
+                return clean_text(article)
+
+        print(f"trafilatura не дал текст, пробую BeautifulSoup: {url}")
+
+        response = requests.get(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        for tag in soup(
+            [
+                "script",
+                "style",
+                "nav",
+                "header",
+                "footer",
+                "aside",
+                "form",
+                "button",
+            ]
+        ):
+            tag.decompose()
+
+        article_tag = (
+            soup.find("article")
+            or soup.find("main")
+            or soup.find(
+                "div",
+                class_=re.compile(
+                    r"(article|post|entry|content)", re.IGNORECASE
+                ),
+            )
         )
 
-        if not article:
-            print(f"Текст статьи не извлёкся: {url}")
-            return ""
+        if article_tag:
+            text = article_tag.get_text(" ", strip=True)
+        else:
+            text = soup.get_text(" ", strip=True)
 
-        return clean_text(article)
+        text = clean_text(text)
+
+        if len(text) > 300:
+            print(f"Текст получен через BeautifulSoup: {url}")
+            return text
+
+        print(f"BeautifulSoup не нашёл достаточно текста: {url}")
+        return ""
+
     except Exception as error:
         print(f"Не удалось извлечь текст статьи {url}: {error}")
         return ""
@@ -328,7 +383,6 @@ def build_message(items):
 
     return "\n".join(lines)
 
-
 def build_audio_text(items):
     lines = [
         "Привет! Это аудиоверсия Retro Game Grave.",
@@ -360,6 +414,7 @@ def build_audio_text(items):
 
     lines.append("Это были главные новости Retro Game Grave.")
     return " ".join(lines)
+
 
 
 def create_audio(text):
