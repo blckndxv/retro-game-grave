@@ -22,8 +22,10 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
-          pip install feedparser requests Pillow
+          pip install feedparser requests Pillow edge-tts pydub
 
       - name: Run digest
         env:
