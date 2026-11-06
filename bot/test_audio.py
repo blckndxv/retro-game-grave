@@ -1,12 +1,12 @@
-import asyncio
+import glob
 import os
+import random
 
-import edge_tts
+from gtts import gTTS
 from pydub import AudioSegment
 
-VOICE = "ru-RU-DmitryNeural"
 VOICE_FILE = "bot/audio/voice.mp3"
-BACKGROUND_FILE = "bot/audio/background.mp3"
+BACKGROUND_FOLDER = "bot/audio"
 OUTPUT_FILE = "bot/audio/test_digest.mp3"
 
 TEXT = (
@@ -16,19 +16,41 @@ TEXT = (
 )
 
 
-async def create_voice():
-    communicate = edge_tts.Communicate(TEXT, VOICE)
-    await communicate.save(VOICE_FILE)
+def create_voice():
+    speech = gTTS(text=TEXT, lang="ru")
+    speech.save(VOICE_FILE)
+
+
+def choose_background():
+    files = glob.glob(os.path.join(BACKGROUND_FOLDER, "*.mp3"))
+    files = [
+        file
+        for file in files
+        if os.path.basename(file) not in ("voice.mp3", "test_digest.mp3")
+    ]
+
+    if not files:
+        return None
+
+    return random.choice(files)
 
 
 def mix_audio():
-    if not os.path.exists(BACKGROUND_FILE):
+    background_file = choose_background()
+
+    if not background_file:
         print("Фоновая музыка не найдена. Создаю только голос.")
-        os.rename(VOICE_FILE, OUTPUT_FILE)
+        os.replace(VOICE_FILE, OUTPUT_FILE)
         return
 
+    print(f"Выбран фон: {background_file}")
+
     voice = AudioSegment.from_file(VOICE_FILE, format="mp3")
-    music = AudioSegment.from_file(BACKGROUND_FILE, format="mp3")
+    music = AudioSegment.from_file(background_file, format="mp3")
+
+    if len(music) < len(voice):
+        repeats = (len(voice) // len(music)) + 1
+        music = music * repeats
 
     music = music[: len(voice)]
     music = music - 24
@@ -39,10 +61,10 @@ def mix_audio():
     print(f"Готово: {OUTPUT_FILE}")
 
 
-async def main():
-    await create_voice()
+def main():
+    create_voice()
     mix_audio()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
