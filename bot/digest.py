@@ -1,12 +1,16 @@
+import glob
 import html
 import io
 import json
 import os
+import random
 import subprocess
 
 import feedparser
 import requests
+from gtts import gTTS
 from PIL import Image, ImageDraw, ImageFont
+from pydub import AudioSegment
 
 FEEDS = [
     ("Retro Handhelds", "https://retrohandhelds.gg/feed/"),
@@ -16,6 +20,11 @@ FEEDS = [
 STATE_FILE = "bot/sent_links.json"
 CHAT_ID_FILE = "bot/chat_id.txt"
 COLLAGE_FILE = "bot/collage.png"
+
+AUDIO_FOLDER = "bot/audio"
+RAW_VOICE_FILE = "/tmp/voice_raw.mp3"
+FAST_VOICE_FILE = "/tmp/voice_fast.mp3"
+AUDIO_FILE = "/tmp/digest.mp3"
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 GIT_EMAIL = "actions@github.com"
@@ -38,7 +47,7 @@ def commit_state():
     subprocess.run(["git", "config", "user.name", GIT_NAME], check=True)
     subprocess.run(["git", "config", "user.email", GIT_EMAIL], check=True)
 
-    subprocess.run(["git", "add", "bot"], check=True)
+    subprocess.run(["git", "add", "bot/sent_links.json"], check=True)
 
     result = subprocess.run(
         ["git", "diff", "--cached", "--quiet"],
@@ -220,6 +229,97 @@ def build_message(items):
     return "\n".join(lines)
 
 
+def build_audio_text(items):
+    lines = [
+        "Привет! Это аудиоверсия Retro Game Grave.",
+        "Главные новости дня:",
+    ]
+
+    for index, item in enumerate(items[:3], start=1):
+        title = translate_text(item["title"])
+        lines.append(f"Новость номер {index}: {title}.")
+
+    lines.append("Полный дайджест и ссылки — в сообщении выше.")
+    return " ".join(lines)
+
+
+def create_audio(text):
+    speech = gTTS(text=text, lang="ru")
+    speech.save(RAW_VOICE_FILE)
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            RAW_VOICE_FILE,
+            "-filter:a",
+            "atempo=1.25",
+            FAST_VOICE_FILE,
+        ],
+        check=True,
+    )
+
+    background_files = [
+        file
+        for file in glob.glob(os.path.join(AUDIO_FOLDER, "*.mp3"))
+        if os.path.basename(file) != "background_1.mp3"
+        or True
+    ]
+
+    background_files = [
+        file
+        for file in background_files
+        if os.path.basename(file)
+        not in ("voice_raw.mp3", "voice_fast.mp3", "digest.mp3")
+    ]
+
+    if not background_files:
+        print("Фоновая музыка не найдена. Отправляю голос без фона.")
+        os.replace(FAST_VOICE_FILE, AUDIO_FILE)
+        return
+
+    background_file = random.choice(background_files)
+    print(f"Выбран фон: {background_file}")
+
+    voice = AudioSegment.from_file(FAST_VOICE_FILE, format="mp3")
+    music = AudioSegment.from_file(background_file, format="mp3")
+
+    if len(music) < len(voice):
+        repeats = (len(voice) // len(music)) + 1
+        music = music * repeats
+
+    music = music[: len(voice)]
+    music = music - 6
+
+    mixed = music.overlay(voice)
+    mixed.export(AUDIO_FILE, format="mp3", bitrate="128k")
+
+    print(f"Аудиоверсия готова: {AUDIO_FILE}")
+
+
+def send_audio(chat_id):
+    if not os.path.exists(AUDIO_FILE):
+        print("Аудиофайл не создан. Пропускаю отправку аудио.")
+        return
+
+    with open(AUDIO_FILE, "rb") as audio:
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendAudio",
+            data={
+                "chat_id": chat_id,
+                "caption": "🎧 Аудиоверсия дайджеста",
+                "title": "Retro Game Grave",
+                "performer": "Retro Game Grave",
+            },
+            files={"audio": audio},
+            timeout=120,
+        )
+
+    response.raise_for_status()
+    print("Аудиоверсия отправлена в Telegram.")
+
+
 def download_image(url):
     try:
         response = requests.get(url, timeout=20)
@@ -358,6 +458,10 @@ def send_digest(chat_id, message):
         )
 
     response.raise_for_status()
+
+    audio_text = build_audio_text(current_items)
+    create_audio(audio_text)
+    send_audio(chat_id)
 
 
 def main():
