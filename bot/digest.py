@@ -163,16 +163,40 @@ def clean_text(text):
     return text.strip()
 
 
+def get_entry_text(entry):
+    text = ""
+
+    if entry.get("content"):
+        for content in entry.get("content", []):
+            text += content.get("value", "") + " "
+
+    if not text and entry.get("summary"):
+        text = entry.get("summary", "")
+
+    if not text and entry.get("description"):
+        text = entry.get("description", "")
+
+    return clean_text(text)
+
+
 def fetch_article_text(url):
     try:
         downloaded = trafilatura.fetch_url(url)
 
         if not downloaded:
+            print(f"Страница не скачалась: {url}")
             return ""
 
-        article = trafilatura.extract(downloaded)
+        article = trafilatura.extract(
+            downloaded,
+            url=url,
+            favor_recall=True,
+            include_comments=False,
+            include_tables=False,
+        )
 
         if not article:
+            print(f"Текст статьи не извлёкся: {url}")
             return ""
 
         return clean_text(article)
@@ -264,6 +288,7 @@ def collect_new_items(sent_links):
                         break
 
             published = entry.get("published_parsed")
+            feed_text = get_entry_text(entry)
 
             new_items.append(
                 {
@@ -272,6 +297,7 @@ def collect_new_items(sent_links):
                     "link": link,
                     "image_url": image_url,
                     "published": published,
+                    "feed_text": feed_text,
                 }
             )
 
@@ -312,6 +338,9 @@ def build_audio_text(items):
     for index, item in enumerate(items[:3], start=1):
         title = translate_text(item["title"])
         article = fetch_article_text(item["link"])
+
+        if not article:
+            article = item.get("feed_text", "")
 
         if article:
             article = article[:2500].strip()
