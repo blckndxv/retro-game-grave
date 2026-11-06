@@ -30,7 +30,7 @@ jobs:
         run: python bot/test_audio.py
 
       - name: Upload test audio
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-audio
           path: bot/audio/test_digest.mp3
