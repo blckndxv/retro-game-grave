@@ -1,15 +1,13 @@
-import asyncio
 import glob
 import os
 import random
+import subprocess
 
-import edge_tts
 from gtts import gTTS
 from pydub import AudioSegment
 
-VOICE = "ru-RU-DmitryNeural"
-VOICE_RATE = "+25%"
-VOICE_FILE = "bot/audio/voice.mp3"
+VOICE_FILE = "bot/audio/voice_raw.mp3"
+VOICE_FILE_FAST = "bot/audio/voice.mp3"
 BACKGROUND_FOLDER = "bot/audio"
 OUTPUT_FILE = "bot/audio/test_digest.mp3"
 
@@ -20,30 +18,24 @@ TEXT = (
 )
 
 
-async def create_edge_voice():
-    communicate = edge_tts.Communicate(
-        TEXT,
-        VOICE,
-        rate=VOICE_RATE,
-    )
-    await communicate.save(VOICE_FILE)
-
-
-def create_gtts_voice():
+def create_voice():
     speech = gTTS(text=TEXT, lang="ru")
     speech.save(VOICE_FILE)
 
 
-async def create_voice():
-    try:
-        await create_edge_voice()
-        print("Голос создан через Edge TTS.")
-        return
-    except Exception as error:
-        print(f"Edge TTS не сработал: {error}")
-
-    print("Создаю голос через gTTS.")
-    create_gtts_voice()
+def make_voice_faster():
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            VOICE_FILE,
+            "-filter:a",
+            "atempo=1.25",
+            VOICE_FILE_FAST,
+        ],
+        check=True,
+    )
 
 
 def choose_background():
@@ -51,7 +43,8 @@ def choose_background():
     files = [
         file
         for file in files
-        if os.path.basename(file) not in ("voice.mp3", "test_digest.mp3")
+        if os.path.basename(file)
+        not in ("voice_raw.mp3", "voice.mp3", "test_digest.mp3")
     ]
 
     if not files:
@@ -65,12 +58,12 @@ def mix_audio():
 
     if not background_file:
         print("Фоновая музыка не найдена. Создаю только голос.")
-        os.replace(VOICE_FILE, OUTPUT_FILE)
+        os.replace(VOICE_FILE_FAST, OUTPUT_FILE)
         return
 
     print(f"Выбран фон: {background_file}")
 
-    voice = AudioSegment.from_file(VOICE_FILE, format="mp3")
+    voice = AudioSegment.from_file(VOICE_FILE_FAST, format="mp3")
     music = AudioSegment.from_file(background_file, format="mp3")
 
     if len(music) < len(voice):
@@ -78,7 +71,7 @@ def mix_audio():
         music = music * repeats
 
     music = music[: len(voice)]
-    music = music - 12
+    music = music - 6
 
     mixed = music.overlay(voice)
     mixed.export(OUTPUT_FILE, format="mp3", bitrate="128k")
@@ -86,10 +79,11 @@ def mix_audio():
     print(f"Готово: {OUTPUT_FILE}")
 
 
-async def main():
-    await create_voice()
+def main():
+    create_voice()
+    make_voice_faster()
     mix_audio()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
