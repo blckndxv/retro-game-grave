@@ -290,25 +290,55 @@ def fetch_article_text(url):
 
 
 def translate_chunk(text):
-    response = requests.get(
-        "https://translate.googleapis.com/translate_a/single",
-        params={
-            "client": "gtx",
-            "sl": "auto",
-            "tl": "ru",
-            "dt": "t",
-            "q": text,
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
+    try:
+        response = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": "ru",
+                "dt": "t",
+                "q": text,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-    return "".join(
-        part[0]
-        for part in data[0]
-        if part and part[0]
-    ).strip()
+        translated = "".join(
+            part[0]
+            for part in data[0]
+            if part and part[0]
+        ).strip()
+
+        if translated:
+            return translated
+
+    except Exception as error:
+        print(f"Google Translate: ошибка — {error}")
+
+    try:
+        response = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={
+                "q": text,
+                "langpair": "en|ru",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        translated = html.unescape(
+            data.get("responseData", {}).get("translatedText", "")
+        ).strip()
+
+        if translated:
+            return translated
+
+    except Exception as error:
+        print(f"MyMemory: ошибка — {error}")
+
+    return ""
 
 
 def translate_long_text(text):
@@ -316,22 +346,30 @@ def translate_long_text(text):
         return ""
 
     chunks = []
+    current_chunk = ""
 
-    while text:
-        chunks.append(text[:4000])
-        text = text[4000:]
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if len(current_chunk) + len(sentence) + 1 > 1800:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+
+            current_chunk = sentence
+        else:
+            current_chunk += " " + sentence
+
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
 
     translated_parts = []
 
     for index, chunk in enumerate(chunks, start=1):
-        try:
-            translated = translate_chunk(chunk)
+        translated = translate_chunk(chunk)
 
-            if translated:
-                translated_parts.append(translated)
-                print(f"Перевод части {index}: OK")
-        except Exception as error:
-            print(f"Перевод части {index}: ошибка — {error}")
+        if translated:
+            print(f"Перевод части {index}: OK")
+            translated_parts.append(translated)
+        else:
+            print(f"Перевод части {index}: не удалось")
 
     return " ".join(translated_parts).strip()
 
@@ -423,14 +461,25 @@ def build_audio_text(items):
         title = translate_text(item["title"])
         article = fetch_article_text(item["link"])
 
+        print(
+            f"Новость {index}: длина текста до перевода — {len(article)}"
+        )
+
         if not article:
             article = item.get("feed_text", "")
+            print(
+                f"Новость {index}: использую текст из RSS — {len(article)}"
+            )
 
         if article:
             article = article[:2500].strip()
             article_ru = translate_long_text(article)
         else:
             article_ru = ""
+
+        print(
+            f"Новость {index}: длина русского текста — {len(article_ru)}"
+        )
 
         lines.append(f"Новость номер {index}: {title}.")
 
@@ -607,76 +656,4 @@ def build_collage(items):
             card = crop_to_ratio(image, card_width, card_height)
             canvas.paste(card, (x, y))
             draw.rectangle(
-                [x, y, x + card_width, y + card_height],
-                outline=accent,
-                width=4,
-            )
-            draw.text(
-                (x + 16, y + card_height - 48),
-                item["source"],
-                font=label_font,
-                fill="white",
-            )
-
-    draw.text(
-        (80, 1330),
-        "только свежие новости из мира ретро",
-        font=footer_font,
-        fill="white",
-    )
-
-    canvas.save(COLLAGE_FILE, "PNG")
-
-
-def send_digest(chat_id, message):
-    build_collage(current_items)
-
-    caption = message
-
-    while len(caption) > 1024 and len(current_items) > 1:
-        current_items.pop()
-        caption = build_message(current_items)
-
-    if len(caption) > 1024:
-        caption = caption[:1021].rstrip() + "..."
-
-    with open(COLLAGE_FILE, "rb") as photo:
-        response = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
-            data={
-                "chat_id": chat_id,
-                "caption": caption,
-                "parse_mode": "HTML",
-            },
-            files={"photo": photo},
-            timeout=60,
-        )
-
-    response.raise_for_status()
-
-    audio_text = build_audio_text(current_items)
-    create_audio(audio_text)
-    send_audio(chat_id)
-
-
-def main():
-    global current_items
-
-    sent_links = load_state()
-    current_items = collect_new_items(sent_links)
-
-    if not current_items:
-        print("Новых публикаций нет. Сообщение не отправляется.")
-        return
-
-    chat_id = get_chat_id()
-    message = build_message(current_items)
-    send_digest(chat_id, message)
-
-    sent_links.update(item["link"] for item in current_items)
-    save_state(sent_links)
-    commit_state()
-
-
-if __name__ == "__main__":
-    main()
+                [x, y, x
