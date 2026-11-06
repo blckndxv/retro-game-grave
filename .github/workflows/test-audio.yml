@@ -24,7 +24,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
-          pip install gTTS pydub
+          pip install edge-tts gTTS pydub
 
       - name: Create test audio
         run: python bot/test_audio.py
