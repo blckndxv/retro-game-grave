@@ -7,7 +7,7 @@ import edge_tts
 from gtts import gTTS
 from pydub import AudioSegment
 
-VOICE = "ru-RU-SvetlanaNeural"
+VOICE = "ru-RU-DmitryNeural"
 VOICE_RATE = "+25%"
 VOICE_FILE = "bot/audio/voice.mp3"
 BACKGROUND_FOLDER = "bot/audio"
@@ -25,8 +25,6 @@ async def create_edge_voice():
         TEXT,
         VOICE,
         rate=VOICE_RATE,
-        volume="+0%",
-        pitch="+0Hz",
     )
     await communicate.save(VOICE_FILE)
 
