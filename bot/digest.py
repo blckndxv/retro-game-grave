@@ -181,6 +181,32 @@ def get_entry_text(entry):
 
 
 def fetch_article_text(url):
+    jina_url = "https://r.jina.ai/" + url
+
+    try:
+        response = requests.get(
+            jina_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0 Safari/537.36"
+                )
+            },
+            timeout=40,
+        )
+
+        if response.ok:
+            text = clean_text(response.text)
+
+            if len(text) > 300:
+                print(f"Текст получен через Jina Reader: {url}")
+                return text
+
+        print(f"Jina Reader не дал текст: {url}")
+    except Exception as error:
+        print(f"Jina Reader: ошибка — {error}")
+
     try:
         downloaded = trafilatura.fetch_url(url)
 
@@ -197,8 +223,11 @@ def fetch_article_text(url):
                 print(f"Текст получен через trafilatura: {url}")
                 return clean_text(article)
 
-        print(f"trafilatura не дал текст, пробую BeautifulSoup: {url}")
+        print(f"trafilatura не дал текст: {url}")
+    except Exception as error:
+        print(f"trafilatura: ошибка — {error}")
 
+    try:
         response = requests.get(
             url,
             headers={
@@ -236,7 +265,8 @@ def fetch_article_text(url):
             or soup.find(
                 "div",
                 class_=re.compile(
-                    r"(article|post|entry|content)", re.IGNORECASE
+                    r"(entry-content|article-content|post-content|content)",
+                    re.IGNORECASE,
                 ),
             )
         )
@@ -253,11 +283,10 @@ def fetch_article_text(url):
             return text
 
         print(f"BeautifulSoup не нашёл достаточно текста: {url}")
-        return ""
-
     except Exception as error:
-        print(f"Не удалось извлечь текст статьи {url}: {error}")
-        return ""
+        print(f"BeautifulSoup: ошибка — {error}")
+
+    return ""
 
 
 def translate_chunk(text):
@@ -383,6 +412,7 @@ def build_message(items):
 
     return "\n".join(lines)
 
+
 def build_audio_text(items):
     lines = [
         "Привет! Это аудиоверсия Retro Game Grave.",
@@ -414,7 +444,6 @@ def build_audio_text(items):
 
     lines.append("Это были главные новости Retro Game Grave.")
     return " ".join(lines)
-
 
 
 def create_audio(text):
