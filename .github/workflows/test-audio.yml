@@ -1,0 +1,36 @@
+name: Test audio
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install edge-tts pydub
+
+      - name: Create test audio
+        run: python bot/test_audio.py
+
+      - name: Upload test audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-audio
+          path: bot/audio/test_digest.mp3
