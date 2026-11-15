@@ -1,19 +1,13 @@
-import glob
 import html
 import io
 import json
 import os
-import random
 import re
 import subprocess
 
 import feedparser
 import requests
-import trafilatura
-from bs4 import BeautifulSoup
-from gtts import gTTS
 from PIL import Image, ImageDraw, ImageFont
-from pydub import AudioSegment
 
 FEEDS = [
     ("Retro Handhelds", "https://retrohandhelds.gg/feed/"),
@@ -24,11 +18,6 @@ STATE_FILE = "bot/sent_links.json"
 CHAT_ID_FILE = "bot/chat_id.txt"
 COLLAGE_FILE = "bot/collage.png"
 
-AUDIO_FOLDER = "bot/audio"
-RAW_VOICE_FILE = "/tmp/voice_raw.mp3"
-FAST_VOICE_FILE = "/tmp/voice_fast.mp3"
-AUDIO_FILE = "/tmp/digest.mp3"
-
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 GIT_EMAIL = "actions@github.com"
 GIT_NAME = "GitHub Actions"
@@ -36,8 +25,12 @@ GIT_NAME = "GitHub Actions"
 
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r", encoding="utf-8") as file:
-            return set(json.load(file))
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as file:
+                data = json.load(file)
+                return set(data)
+        except Exception:
+            return set()
     return set()
 
 
@@ -62,7 +55,7 @@ def commit_state():
         return
 
     subprocess.run(
-        ["git", "commit", "-m", "Update digest state"],
+        ["git", "commit", "-m", "Update sent links"],
         check=True,
     )
     subprocess.run(["git", "push"], check=True)
@@ -72,6 +65,7 @@ def get_chat_id():
     if os.path.exists(CHAT_ID_FILE):
         with open(CHAT_ID_FILE, "r", encoding="utf-8") as file:
             chat_id = file.read().strip()
+
             if chat_id:
                 return chat_id
 
@@ -80,10 +74,12 @@ def get_chat_id():
         timeout=30,
     )
     response.raise_for_status()
+
     updates = response.json().get("result", [])
 
     for update in reversed(updates):
         message = update.get("message") or update.get("channel_post")
+
         if message:
             chat_id = str(message["chat"]["id"])
 
@@ -94,8 +90,7 @@ def get_chat_id():
 
     raise RuntimeError(
         "Не удалось определить chat_id. "
-        "Открой @RetroGameGraveNewsBot в Telegram, отправь /start "
-        "и запусти workflow ещё раз."
+        "Открой бота в Telegram, отправь /start и запусти workflow снова."
     )
 
 
@@ -116,6 +111,7 @@ def translate_text(text):
             timeout=20,
         )
         response.raise_for_status()
+
         data = response.json()
         translated = "".join(
             part[0]
@@ -123,45 +119,15 @@ def translate_text(text):
             if part and part[0]
         ).strip()
 
-        if translated and translated != text:
-            print(f"Google Translate: OK — {translated}")
+        if translated:
+            print(f"Переведено: {translated}")
             return translated
 
-        print(f"Google Translate: не перевёл — {text}")
     except Exception as error:
-        print(f"Google Translate: ошибка — {error}")
+        print(f"Ошибка перевода: {error}")
 
-    try:
-        response = requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={
-                "q": text,
-                "langpair": "en|ru",
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        data = response.json()
-        translated = data.get("responseData", {}).get("translatedText", "")
-        translated = html.unescape(translated).strip()
-
-        if translated and translated != text:
-            print(f"MyMemory: OK — {translated}")
-            return translated
-
-        print(f"MyMemory: не перевёл — {text}")
-    except Exception as error:
-        print(f"MyMemory: ошибка — {error}")
-
-    print(f"Перевод не выполнен, отправляю оригинал: {text}")
+    print(f"Перевод не выполнен, оставляю оригинал: {text}")
     return text
-
-
-def clean_text(text):
-    text = html.unescape(text or "")
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
 
 
 def get_entry_text(entry):
@@ -177,208 +143,42 @@ def get_entry_text(entry):
     if not text and entry.get("description"):
         text = entry.get("description", "")
 
-    return clean_text(text)
+    text = html.unescape(text or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 
-def fetch_article_text(url):
-    jina_url = "https://r.jina.ai/" + url
-
-    try:
-        response = requests.get(
-            jina_url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/125.0 Safari/537.36"
-                )
-            },
-            timeout=40,
-        )
-
-        if response.ok:
-            text = clean_text(response.text)
-
-            if len(text) > 300:
-                print(f"Текст получен через Jina Reader: {url}")
-                return text
-
-        print(f"Jina Reader не дал текст: {url}")
-    except Exception as error:
-        print(f"Jina Reader: ошибка — {error}")
-
-    try:
-        downloaded = trafilatura.fetch_url(url)
-
-        if downloaded:
-            article = trafilatura.extract(
-                downloaded,
-                url=url,
-                favor_recall=True,
-                include_comments=False,
-                include_tables=False,
-            )
-
-            if article:
-                print(f"Текст получен через trafilatura: {url}")
-                return clean_text(article)
-
-        print(f"trafilatura не дал текст: {url}")
-    except Exception as error:
-        print(f"trafilatura: ошибка — {error}")
-
-    try:
-        response = requests.get(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/125.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        for tag in soup(
-            [
-                "script",
-                "style",
-                "nav",
-                "header",
-                "footer",
-                "aside",
-                "form",
-                "button",
-            ]
+def get_entry_image(entry):
+    for media in entry.get("media_content", []):
+        if media.get("url", "").lower().endswith(
+            (".jpg", ".jpeg", ".png", ".webp")
         ):
-            tag.decompose()
+            return media["url"]
 
-        article_tag = (
-            soup.find("article")
-            or soup.find("main")
-            or soup.find(
-                "div",
-                class_=re.compile(
-                    r"(entry-content|article-content|post-content|content)",
-                    re.IGNORECASE,
-                ),
-            )
-        )
+    for media in entry.get("media_thumbnail", []):
+        if media.get("url"):
+            return media["url"]
 
-        if article_tag:
-            text = article_tag.get_text(" ", strip=True)
-        else:
-            text = soup.get_text(" ", strip=True)
+    for link in entry.get("links", []):
+        if link.get("rel") == "enclosure" and link.get("type", "").startswith(
+            "image/"
+        ):
+            return link.get("href")
 
-        text = clean_text(text)
-
-        if len(text) > 300:
-            print(f"Текст получен через BeautifulSoup: {url}")
-            return text
-
-        print(f"BeautifulSoup не нашёл достаточно текста: {url}")
-    except Exception as error:
-        print(f"BeautifulSoup: ошибка — {error}")
-
-    return ""
-
-
-def translate_chunk(text):
-    try:
-        response = requests.get(
-            "https://translate.googleapis.com/translate_a/single",
-            params={
-                "client": "gtx",
-                "sl": "auto",
-                "tl": "ru",
-                "dt": "t",
-                "q": text,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        translated = "".join(
-            part[0]
-            for part in data[0]
-            if part and part[0]
-        ).strip()
-
-        if translated:
-            return translated
-
-    except Exception as error:
-        print(f"Google Translate: ошибка — {error}")
-
-    try:
-        response = requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={
-                "q": text,
-                "langpair": "en|ru",
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        translated = html.unescape(
-            data.get("responseData", {}).get("translatedText", "")
-        ).strip()
-
-        if translated:
-            return translated
-
-    except Exception as error:
-        print(f"MyMemory: ошибка — {error}")
-
-    return ""
-
-
-def translate_long_text(text):
-    if not text:
-        return ""
-
-    chunks = []
-    current_chunk = ""
-
-    for sentence in re.split(r"(?<=[.!?])\s+", text):
-        if len(current_chunk) + len(sentence) + 1 > 1800:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-
-            current_chunk = sentence
-        else:
-            current_chunk += " " + sentence
-
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
-
-    translated_parts = []
-
-    for index, chunk in enumerate(chunks, start=1):
-        translated = translate_chunk(chunk)
-
-        if translated:
-            print(f"Перевод части {index}: OK")
-            translated_parts.append(translated)
-        else:
-            print(f"Перевод части {index}: не удалось")
-
-    return " ".join(translated_parts).strip()
+    return None
 
 
 def collect_new_items(sent_links):
-    new_items = []
+    items = []
 
     for source_name, feed_url in FEEDS:
-        feed = feedparser.parse(feed_url)
+        try:
+            feed = feedparser.parse(feed_url)
+        except Exception as error:
+            print(f"Не удалось прочитать RSS {source_name}: {error}")
+            continue
 
         for entry in feed.entries:
             link = entry.get("link", "").strip()
@@ -387,48 +187,27 @@ def collect_new_items(sent_links):
             if not link or not title or link in sent_links:
                 continue
 
-            image_url = None
-
-            for media in entry.get("media_content", []):
-                if media.get("url", "").lower().endswith(
-                    (".jpg", ".jpeg", ".png", ".webp")
-                ):
-                    image_url = media["url"]
-                    break
-
-            if not image_url:
-                for media in entry.get("media_thumbnail", []):
-                    image_url = media.get("url")
-                    break
-
-            if not image_url:
-                for enclosure in entry.get("links", []):
-                    if enclosure.get("rel") == "enclosure" and enclosure.get(
-                        "type", ""
-                    ).startswith("image/"):
-                        image_url = enclosure.get("href")
-                        break
-
             published = entry.get("published_parsed")
-            feed_text = get_entry_text(entry)
+            summary = get_entry_text(entry)
+            image_url = get_entry_image(entry)
 
-            new_items.append(
+            items.append(
                 {
                     "source": source_name,
                     "title": title,
                     "link": link,
+                    "summary": summary,
                     "image_url": image_url,
                     "published": published,
-                    "feed_text": feed_text,
                 }
             )
 
-    new_items.sort(
+    items.sort(
         key=lambda item: item["published"] or (0, 0, 0, 0, 0, 0, 0, 0, 0),
         reverse=True,
     )
 
-    return new_items[:10]
+    return items[:10]
 
 
 def build_message(items):
@@ -449,120 +228,6 @@ def build_message(items):
         lines.pop()
 
     return "\n".join(lines)
-
-
-def build_audio_text(items):
-    lines = [
-        "Привет! Это аудиоверсия Retro Game Grave.",
-        "Сегодня в выпуске:",
-    ]
-
-    for index, item in enumerate(items[:3], start=1):
-        title = translate_text(item["title"])
-        article = fetch_article_text(item["link"])
-
-        print(
-            f"Новость {index}: длина текста до перевода — {len(article)}"
-        )
-
-        if not article:
-            article = item.get("feed_text", "")
-            print(
-                f"Новость {index}: использую текст из RSS — {len(article)}"
-            )
-
-        if article:
-            article = article[:2500].strip()
-            article_ru = translate_long_text(article)
-        else:
-            article_ru = ""
-
-        print(
-            f"Новость {index}: длина русского текста — {len(article_ru)}"
-        )
-
-        lines.append(f"Новость номер {index}: {title}.")
-
-        if article_ru:
-            lines.append(article_ru)
-        else:
-            lines.append(
-                "Подробный текст этой новости пока не удалось получить. "
-                "Ссылка на оригинал есть в текстовом дайджесте."
-            )
-
-    lines.append("Это были главные новости Retro Game Grave.")
-    return " ".join(lines)
-
-
-def create_audio(text):
-    speech = gTTS(text=text, lang="ru")
-    speech.save(RAW_VOICE_FILE)
-
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            RAW_VOICE_FILE,
-            "-filter:a",
-            "atempo=1.25",
-            FAST_VOICE_FILE,
-        ],
-        check=True,
-    )
-
-    background_files = [
-        file
-        for file in glob.glob(os.path.join(AUDIO_FOLDER, "*.mp3"))
-        if os.path.basename(file)
-        not in ("voice_raw.mp3", "voice_fast.mp3", "digest.mp3")
-    ]
-
-    if not background_files:
-        print("Фоновая музыка не найдена. Отправляю голос без фона.")
-        os.replace(FAST_VOICE_FILE, AUDIO_FILE)
-        return
-
-    background_file = random.choice(background_files)
-    print(f"Выбран фон: {background_file}")
-
-    voice = AudioSegment.from_file(FAST_VOICE_FILE, format="mp3")
-    music = AudioSegment.from_file(background_file, format="mp3")
-
-    if len(music) < len(voice):
-        repeats = (len(voice) // len(music)) + 1
-        music = music * repeats
-
-    music = music[: len(voice)]
-    music = music - 6
-
-    mixed = music.overlay(voice)
-    mixed.export(AUDIO_FILE, format="mp3", bitrate="128k")
-
-    print(f"Аудиоверсия готова: {AUDIO_FILE}")
-
-
-def send_audio(chat_id):
-    if not os.path.exists(AUDIO_FILE):
-        print("Аудиофайл не создан. Пропускаю отправку аудио.")
-        return
-
-    with open(AUDIO_FILE, "rb") as audio:
-        response = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendAudio",
-            data={
-                "chat_id": chat_id,
-                "caption": "🎧 Аудиоверсия дайджеста",
-                "title": "Retro Game Grave",
-                "performer": "Retro Game Grave",
-            },
-            files={"audio": audio},
-            timeout=120,
-        )
-
-    response.raise_for_status()
-    print("Аудиоверсия отправлена в Telegram.")
 
 
 def download_image(url):
@@ -599,6 +264,7 @@ def load_font(size):
     ]:
         if os.path.exists(path):
             return ImageFont.truetype(path, size)
+
     return ImageFont.load_default()
 
 
@@ -628,6 +294,7 @@ def build_collage(items):
     for item in items:
         if item.get("image_url"):
             image = download_image(item["image_url"])
+
             if image:
                 images.append((item, image))
 
@@ -644,6 +311,7 @@ def build_collage(items):
     else:
         card_width = 500
         card_height = 380
+
         positions = [
             (80, 360),
             (620, 360),
@@ -655,5 +323,74 @@ def build_collage(items):
             x, y = positions[index]
             card = crop_to_ratio(image, card_width, card_height)
             canvas.paste(card, (x, y))
+
             draw.rectangle(
-                [x, y, x
+                [x, y, x + card_width, y + card_height],
+                outline=accent,
+                width=4,
+            )
+
+            draw.text(
+                (x + 16, y + card_height - 48),
+                item["source"],
+                font=label_font,
+                fill="white",
+            )
+
+    draw.text(
+        (80, 1330),
+        "только свежие новости из мира ретро",
+        font=footer_font,
+        fill="white",
+    )
+
+    canvas.save(COLLAGE_FILE, "PNG")
+
+
+def send_digest(chat_id, items, message):
+    build_collage(items)
+
+    caption = message
+
+    while len(caption) > 1024 and len(items) > 1:
+        items.pop()
+        caption = build_message(items)
+
+    if len(caption) > 1024:
+        caption = caption[:1021].rstrip() + "..."
+
+    with open(COLLAGE_FILE, "rb") as photo:
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
+            data={
+                "chat_id": chat_id,
+                "caption": caption,
+                "parse_mode": "HTML",
+            },
+            files={"photo": photo},
+            timeout=60,
+        )
+
+    response.raise_for_status()
+    print("Дайджест отправлен в Telegram.")
+
+
+def main():
+    sent_links = load_state()
+    items = collect_new_items(sent_links)
+
+    if not items:
+        print("Новых публикаций нет. Сообщение не отправляется.")
+        return
+
+    chat_id = get_chat_id()
+    message = build_message(items)
+    send_digest(chat_id, items, message)
+
+    sent_links.update(item["link"] for item in items)
+    save_state(sent_links)
+    commit_state()
+
+
+if __name__ == "__main__":
+    main()
