@@ -2,6 +2,7 @@ import html
 import io
 import json
 import os
+import random
 import re
 import subprocess
 
@@ -113,36 +114,85 @@ def translate_text(text):
     if not text:
         return text
 
-    try:
-        response = requests.get(
+    providers = [
+        (
+            "Google Chrome",
+            "https://clients5.google.com/translate_a/t",
+            {
+                "client": "dict-chrome-ex",
+                "sl": "auto",
+                "tl": "ru",
+                "q": text,
+            },
+        ),
+        (
+            "Google Classic",
             "https://translate.googleapis.com/translate_a/single",
-            params={
+            {
                 "client": "gtx",
                 "sl": "auto",
                 "tl": "ru",
                 "dt": "t",
                 "q": text,
             },
-            timeout=20,
-        )
-        response.raise_for_status()
+        ),
+        (
+            "MyMemory",
+            "https://api.mymemory.translated.net/get",
+            {
+                "q": text,
+                "langpair": "en|ru",
+            },
+        ),
+    ]
 
-        data = response.json()
+    for provider_name, url, params in providers:
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=20,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-        translated = "".join(
-            part[0]
-            for part in data[0]
-            if part and part[0]
-        ).strip()
+            translated = ""
 
-        if translated:
-            print(f"Переведено: {translated}")
-            return translated
+            if provider_name == "MyMemory":
+                translated = data.get(
+                    "responseData",
+                    {},
+                ).get(
+                    "translatedText",
+                    "",
+                )
+                translated = html.unescape(translated).strip()
 
-    except Exception as error:
-        print(f"Ошибка перевода: {error}")
+            else:
+                translated = "".join(
+                    part[0]
+                    for part in data[0]
+                    if part and part[0]
+                ).strip()
 
-    print(f"Перевод не выполнен, оставляю оригинал: {text}")
+            if translated and translated != text:
+                print(
+                    f"Перевод ({provider_name}): {translated}"
+                )
+                return translated
+
+            print(
+                f"{provider_name}: не смог перевести текст."
+            )
+
+        except Exception as error:
+            print(
+                f"{provider_name}: ошибка — {error}"
+            )
+
+    print(
+        f"Перевод не выполнен, оставляю оригинал: {text}"
+    )
     return text
 
 
@@ -186,44 +236,115 @@ def get_entry_image(entry):
 
 
 def get_hook(item):
-    text = (
-        item["title"]
-        + " "
-        + item["summary"]
-    ).lower()
+    title = item["title"].lower()
+    summary = item["summary"].lower()
 
-    hooks = [
-        ("retro", "Ностальгия по классике — в этой новости."),
-        ("handheld", "Портативный ретро-гейминг снова в центре внимания."),
-        ("console", "Ещё одна страница истории консолей."),
-        ("emulator", "Эмуляторы продолжают менять ретро-гейминг."),
-        ("game boy", "Классика Game Boy всё ещё жива."),
-        ("nintendo", "В мире Nintendo снова происходит интересное."),
-        ("sony", "Sony и ретро-игры — история продолжается."),
-        ("sega", "Sega не перестаёт радовать поклонников классики."),
-        ("steam deck", "Steam Deck расширяет возможности портативного гейминга."),
-        ("android", "Android-гейминг становится всё интереснее."),
-        ("linux", "Linux снова доказывает свою силу в играх."),
-        ("review", "Разбираемся, стоит ли это внимания."),
-        ("guide", "Полезный материал для ретро-геймера."),
-        ("update", "Свежее обновление, которое может быть важным."),
-        ("release", "Свежий релиз, на который стоит взглянуть."),
-        ("new", "Что-то новое из мира ретро-гейминга."),
-        ("sale", "Хороший повод пополнить ретро-коллекцию."),
-        ("discount", "Скидка, которую стоит заметить."),
-        ("hardware", "Железо для ретро-гейминга не стоит на месте."),
-        ("controller", "Геймпады и управление — важная часть ностальгии."),
-        ("mod", "Моддинг открывает старым устройствам новую жизнь."),
-        ("hack", "Кастомные прошивки делают ретро-железо гибче."),
-        ("restoration", "Реставрация возвращает классике вторую жизнь."),
-        ("collection", "Коллекционирование ретро-игр — отдельное искусство."),
+    specific_hooks = [
+        (
+            ["game boy", "gameboy"],
+            "Классика Game Boy всё ещё жива.",
+        ),
+        (
+            ["steam deck"],
+            "Steam Deck расширяет возможности портативного гейминга.",
+        ),
+        (
+            ["nintendo"],
+            "В мире Nintendo снова происходит интересное.",
+        ),
+        (
+            ["sony", "playstation"],
+            "Sony и ретро-игры — история продолжается.",
+        ),
+        (
+            ["sega", "genesis", "mega drive"],
+            "Sega не перестаёт радовать поклонников классики.",
+        ),
+        (
+            ["emulator", "emulation"],
+            "Эмуляторы продолжают менять ретро-гейминг.",
+        ),
+        (
+            ["handheld", "handhelds", "portable"],
+            "Портативный ретро-гейминг снова в центре внимания.",
+        ),
+        (
+            ["console", "consoles"],
+            "Ещё одна страница истории консолей.",
+        ),
+        (
+            ["mod", "mods", "modding"],
+            "Моддинг открывает старым устройствам новую жизнь.",
+        ),
+        (
+            ["hack", "custom firmware", "cfw"],
+            "Кастомные прошивки делают ретро-железо гибче.",
+        ),
+        (
+            ["restoration", "restore", "restored"],
+            "Реставрация возвращает классике вторую жизнь.",
+        ),
+        (
+            ["collection", "collector", "collecting"],
+            "Коллекционирование ретро-игр — отдельное искусство.",
+        ),
+        (
+            ["review", "reviewed"],
+            "Разбираемся, стоит ли это внимания.",
+        ),
+        (
+            ["guide", "how to", "tutorial"],
+            "Полезный материал для ретро-геймера.",
+        ),
+        (
+            ["update", "updated"],
+            "Свежее обновление, которое может быть важным.",
+        ),
+        (
+            ["release", "released", "launched"],
+            "Свежий релиз, на который стоит взглянуть.",
+        ),
+        (
+            ["sale", "discount", "deal"],
+            "Хороший повод пополнить ретро-коллекцию.",
+        ),
+        (
+            ["hardware", "device", "console mod"],
+            "Железо для ретро-гейминга не стоит на месте.",
+        ),
+        (
+            ["controller", "gamepad", "joystick"],
+            "Геймпады и управление — важная часть ностальгии.",
+        ),
+        (
+            ["android"],
+            "Android-гейминг становится всё интереснее.",
+        ),
+        (
+            ["linux"],
+            "Linux снова доказывает свою силу в играх.",
+        ),
     ]
 
-    for keyword, hook in hooks:
-        if keyword in text:
-            return hook
+    for keywords, hook in specific_hooks:
+        for keyword in keywords:
+            if keyword in title:
+                return hook
 
-    return "Свежая новость из мира ретро-гейминга."
+    for keywords, hook in specific_hooks:
+        for keyword in keywords:
+            if keyword in summary:
+                return hook
+
+    neutral_hooks = [
+        "Свежая новость из мира ретро-гейминга.",
+        "Интересное событие для поклонников классики.",
+        "Ещё одна новость из мира старых игр и консолей.",
+        "Ретро-гейминг продолжает удивлять.",
+        "Новая история из мира игровых классиков.",
+    ]
+
+    return random.choice(neutral_hooks)
 
 
 def collect_new_items(sent_links):
@@ -370,137 +491,4 @@ def build_collage(items):
     draw.text(
         (80, 70),
         "Retro Game Grave",
-        font=title_font,
-        fill="white",
-    )
-
-    draw.text(
-        (80, 240),
-        "Retro Handhelds + Retro Dodo",
-        font=subtitle_font,
-        fill=(190, 190, 200),
-    )
-
-    images = []
-
-    for item in items:
-        if item.get("image_url"):
-            image = download_image(item["image_url"])
-
-            if image:
-                images.append((item, image))
-
-        if len(images) == 4:
-            break
-
-    if not images:
-        draw.text(
-            (80, 650),
-            "Сегодня нет изображений\nдля коллажа",
-            font=subtitle_font,
-            fill="white",
-        )
-
-    else:
-        card_width = 500
-        card_height = 380
-
-        positions = [
-            (80, 360),
-            (620, 360),
-            (80, 790),
-            (620, 790),
-        ]
-
-        for index, (item, image) in enumerate(images):
-            x, y = positions[index]
-
-            card = crop_to_ratio(
-                image,
-                card_width,
-                card_height,
-            )
-
-            canvas.paste(card, (x, y))
-
-            draw.rectangle(
-                [
-                    x,
-                    y,
-                    x + card_width,
-                    y + card_height,
-                ],
-                outline=accent,
-                width=4,
-            )
-
-            draw.text(
-                (x + 16, y + card_height - 48),
-                item["source"],
-                font=label_font,
-                fill="white",
-            )
-
-    draw.text(
-        (80, 1330),
-        "только свежие новости из мира ретро",
-        font=footer_font,
-        fill="white",
-    )
-
-    canvas.save(COLLAGE_FILE, "PNG")
-
-
-def send_digest(chat_id, items, message):
-    build_collage(items)
-
-    caption = message
-
-    while len(caption) > 1024 and len(items) > 1:
-        items.pop()
-        caption = build_message(items)
-
-    if len(caption) > 1024:
-        caption = caption[:1021].rstrip() + "..."
-
-    with open(COLLAGE_FILE, "rb") as photo:
-        response = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
-            data={
-                "chat_id": chat_id,
-                "caption": caption,
-                "parse_mode": "HTML",
-            },
-            files={"photo": photo},
-            timeout=60,
-        )
-
-    response.raise_for_status()
-
-    print("Дайджест отправлен в Telegram.")
-
-
-def main():
-    sent_links = load_state()
-    items = collect_new_items(sent_links)
-
-    if not items:
-        print("Новых публикаций нет. Сообщение не отправляется.")
-        return
-
-    chat_id = get_chat_id()
-    message = build_message(items)
-
-    send_digest(
-        chat_id,
-        items,
-        message,
-    )
-
-    sent_links.update(item["link"] for item in items)
-    save_state(sent_links)
-    commit_state()
-
-
-if __name__ == "__main__":
-    main()
+        font=title_
