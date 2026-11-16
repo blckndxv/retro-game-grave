@@ -476,11 +476,7 @@ def build_collage(items):
     background = (18, 18, 22)
     accent = (150, 90, 255)
 
-    canvas = Image.new(
-        "RGB",
-        (width, height),
-        background,
-    )
+    canvas = Image.new("RGB", (width, height), background)
     draw = ImageDraw.Draw(canvas)
 
     title_font = load_font(84)
@@ -491,4 +487,82 @@ def build_collage(items):
     draw.text(
         (80, 70),
         "Retro Game Grave",
-        font=title_
+        font=title_font,
+        fill="white"
+    )
+
+    draw.text(
+        (80, 240),
+        "Retro Handhelds + Retro Dodo",
+        font=subtitle_font,
+        fill=(190, 190, 200)
+    )
+
+    images = []
+
+    for item in items:
+        if item.get("image_url"):
+            image = download_image(item["image_url"])
+
+            if image:
+                images.append((item, image))
+
+        if len(images) == 4:
+            break
+
+    if not images:
+        draw.text(
+            (80, 650),
+            "Сегодня нет изображений\nдля коллажа",
+            font=subtitle_font,
+            fill="white"
+        )
+
+    else:
+        card_width = 500
+        card_height = 380
+
+        positions = [
+            (80, 360),
+            (620, 360),
+            (80, 790),
+            (620, 790)
+        ]
+
+        for index, (item, image) in enumerate(images):
+            x, y = positions[index]
+
+            card = crop_to_ratio(
+                image,
+                card_width,
+                card_height
+            )
+
+            canvas.paste(card, (x, y))
+
+            draw.rectangle(
+                [
+                    x,
+                    y,
+                    x + card_width,
+                    y + card_height
+                ],
+                outline=accent,
+                width=4
+            )
+
+            draw.text(
+                (x + 16, y + card_height - 48),
+                item["source"],
+                font=label_font,
+                fill="white"
+            )
+
+    draw.text(
+        (80, 1330),
+        "только свежие новости из мира ретро",
+        font=footer_font,
+        fill="white"
+    )
+
+    canvas.save(COLLAGE_FILE, "PNG")
