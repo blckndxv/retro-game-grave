@@ -31,19 +31,34 @@ def load_state():
                 return set(data)
         except Exception:
             return set()
+
     return set()
 
 
 def save_state(sent_links):
     with open(STATE_FILE, "w", encoding="utf-8") as file:
-        json.dump(sorted(sent_links), file, ensure_ascii=False, indent=2)
+        json.dump(
+            sorted(sent_links),
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
 
 
 def commit_state():
-    subprocess.run(["git", "config", "user.name", GIT_NAME], check=True)
-    subprocess.run(["git", "config", "user.email", GIT_EMAIL], check=True)
+    subprocess.run(
+        ["git", "config", "user.name", GIT_NAME],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", GIT_EMAIL],
+        check=True,
+    )
 
-    subprocess.run(["git", "add", "bot/sent_links.json"], check=True)
+    subprocess.run(
+        ["git", "add", "bot/sent_links.json"],
+        check=True,
+    )
 
     result = subprocess.run(
         ["git", "diff", "--cached", "--quiet"],
@@ -113,6 +128,7 @@ def translate_text(text):
         response.raise_for_status()
 
         data = response.json()
+
         translated = "".join(
             part[0]
             for part in data[0]
@@ -162,12 +178,52 @@ def get_entry_image(entry):
             return media["url"]
 
     for link in entry.get("links", []):
-        if link.get("rel") == "enclosure" and link.get("type", "").startswith(
-            "image/"
-        ):
-            return link.get("href")
+        if link.get("rel") == "enclosure":
+            if link.get("type", "").startswith("image/"):
+                return link.get("href")
 
     return None
+
+
+def get_hook(item):
+    text = (
+        item["title"]
+        + " "
+        + item["summary"]
+    ).lower()
+
+    hooks = [
+        ("retro", "Ностальгия по классике — в этой новости."),
+        ("handheld", "Портативный ретро-гейминг снова в центре внимания."),
+        ("console", "Ещё одна страница истории консолей."),
+        ("emulator", "Эмуляторы продолжают менять ретро-гейминг."),
+        ("game boy", "Классика Game Boy всё ещё жива."),
+        ("nintendo", "В мире Nintendo снова происходит интересное."),
+        ("sony", "Sony и ретро-игры — история продолжается."),
+        ("sega", "Sega не перестаёт радовать поклонников классики."),
+        ("steam deck", "Steam Deck расширяет возможности портативного гейминга."),
+        ("android", "Android-гейминг становится всё интереснее."),
+        ("linux", "Linux снова доказывает свою силу в играх."),
+        ("review", "Разбираемся, стоит ли это внимания."),
+        ("guide", "Полезный материал для ретро-геймера."),
+        ("update", "Свежее обновление, которое может быть важным."),
+        ("release", "Свежий релиз, на который стоит взглянуть."),
+        ("new", "Что-то новое из мира ретро-гейминга."),
+        ("sale", "Хороший повод пополнить ретро-коллекцию."),
+        ("discount", "Скидка, которую стоит заметить."),
+        ("hardware", "Железо для ретро-гейминга не стоит на месте."),
+        ("controller", "Геймпады и управление — важная часть ностальгии."),
+        ("mod", "Моддинг открывает старым устройствам новую жизнь."),
+        ("hack", "Кастомные прошивки делают ретро-железо гибче."),
+        ("restoration", "Реставрация возвращает классике вторую жизнь."),
+        ("collection", "Коллекционирование ретро-игр — отдельное искусство."),
+    ]
+
+    for keyword, hook in hooks:
+        if keyword in text:
+            return hook
+
+    return "Свежая новость из мира ретро-гейминга."
 
 
 def collect_new_items(sent_links):
@@ -203,7 +259,8 @@ def collect_new_items(sent_links):
             )
 
     items.sort(
-        key=lambda item: item["published"] or (0, 0, 0, 0, 0, 0, 0, 0, 0),
+        key=lambda item: item["published"]
+        or (0, 0, 0, 0, 0, 0, 0, 0, 0),
         reverse=True,
     )
 
@@ -211,16 +268,19 @@ def collect_new_items(sent_links):
 
 
 def build_message(items):
-    lines = ["<b>Retro Game Grave</b>", ""]
+    lines = [
+        "<b>Retro Game Grave</b>",
+        "",
+    ]
 
     for item in items:
         russian_title = translate_text(item["title"])
         safe_title = html.escape(russian_title)
         safe_link = html.escape(item["link"], quote=True)
-        source = html.escape(item["source"])
+        hook = get_hook(item)
 
         lines.append(
-            f'• <a href="{safe_link}">{safe_title}</a>\n{source}'
+            f'• <b><a href="{safe_link}">{safe_title}</a></b>\n{hook}'
         )
         lines.append("")
 
@@ -234,8 +294,13 @@ def download_image(url):
     try:
         response = requests.get(url, timeout=20)
         response.raise_for_status()
-        image = Image.open(io.BytesIO(response.content)).convert("RGB")
+
+        image = Image.open(
+            io.BytesIO(response.content)
+        ).convert("RGB")
+
         return image
+
     except Exception as error:
         print(f"Не удалось скачать изображение: {error}")
         return None
@@ -248,11 +313,28 @@ def crop_to_ratio(image, width, height):
     if image_ratio > target_ratio:
         new_width = int(image.height * target_ratio)
         left = (image.width - new_width) // 2
-        image = image.crop((left, 0, left + new_width, image.height))
+
+        image = image.crop(
+            (
+                left,
+                0,
+                left + new_width,
+                image.height,
+            )
+        )
+
     else:
         new_height = int(image.width / target_ratio)
         top = (image.height - new_height) // 2
-        image = image.crop((0, top, image.width, top + new_height))
+
+        image = image.crop(
+            (
+                0,
+                top,
+                image.width,
+                top + new_height,
+            )
+        )
 
     return image.resize((width, height))
 
@@ -273,7 +355,11 @@ def build_collage(items):
     background = (18, 18, 22)
     accent = (150, 90, 255)
 
-    canvas = Image.new("RGB", (width, height), background)
+    canvas = Image.new(
+        "RGB",
+        (width, height),
+        background,
+    )
     draw = ImageDraw.Draw(canvas)
 
     title_font = load_font(84)
@@ -281,7 +367,13 @@ def build_collage(items):
     label_font = load_font(28)
     footer_font = load_font(34)
 
-    draw.text((80, 70), "Retro Game Grave", font=title_font, fill="white")
+    draw.text(
+        (80, 70),
+        "Retro Game Grave",
+        font=title_font,
+        fill="white",
+    )
+
     draw.text(
         (80, 240),
         "Retro Handhelds + Retro Dodo",
@@ -308,6 +400,7 @@ def build_collage(items):
             font=subtitle_font,
             fill="white",
         )
+
     else:
         card_width = 500
         card_height = 380
@@ -321,11 +414,22 @@ def build_collage(items):
 
         for index, (item, image) in enumerate(images):
             x, y = positions[index]
-            card = crop_to_ratio(image, card_width, card_height)
+
+            card = crop_to_ratio(
+                image,
+                card_width,
+                card_height,
+            )
+
             canvas.paste(card, (x, y))
 
             draw.rectangle(
-                [x, y, x + card_width, y + card_height],
+                [
+                    x,
+                    y,
+                    x + card_width,
+                    y + card_height,
+                ],
                 outline=accent,
                 width=4,
             )
@@ -372,6 +476,7 @@ def send_digest(chat_id, items, message):
         )
 
     response.raise_for_status()
+
     print("Дайджест отправлен в Telegram.")
 
 
@@ -385,7 +490,12 @@ def main():
 
     chat_id = get_chat_id()
     message = build_message(items)
-    send_digest(chat_id, items, message)
+
+    send_digest(
+        chat_id,
+        items,
+        message,
+    )
 
     sent_links.update(item["link"] for item in items)
     save_state(sent_links)
