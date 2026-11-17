@@ -1,4 +1,3 @@
-python
 import html
 import io
 import json
