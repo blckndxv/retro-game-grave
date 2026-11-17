@@ -1,3 +1,4 @@
+python
 import html
 import io
 import json
@@ -123,80 +124,65 @@ def translate_text(text):
     if not text:
         return text
 
-    providers = [
-        (
-            "Google Chrome",
-            "https://clients5.google.com/translate_a/t",
-            {
-                "client": "dict-chrome-ex",
-                "sl": "auto",
-                "tl": "ru",
+    try:
+        response = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={
                 "q": text,
+                "langpair": "en|ru",
             },
-        ),
-        (
-            "Google Classic",
+            timeout=15,
+            headers=HEADERS,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        translated = data.get(
+            "responseData",
+            {},
+        ).get(
+            "translatedText",
+            "",
+        )
+        translated = html.unescape(translated).strip()
+
+        if translated and translated != text:
+            print(f"Перевод (MyMemory): {translated}")
+            return translated
+
+    except Exception as error:
+        print(f"Перевод (MyMemory): ошибка — {error}")
+
+    try:
+        response = requests.get(
             "https://translate.googleapis.com/translate_a/single",
-            {
+            params={
                 "client": "gtx",
                 "sl": "auto",
                 "tl": "ru",
                 "dt": "t",
                 "q": text,
             },
-        ),
-        (
-            "MyMemory",
-            "https://api.mymemory.translated.net/get",
-            {
-                "q": text,
-                "langpair": "en|ru",
-            },
-        ),
-    ]
+            timeout=15,
+            headers=HEADERS,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-    for provider_name, url, params in providers:
-        try:
-            response = requests.get(
-                url,
-                params=params,
-                timeout=15,
-                headers=HEADERS,
-            )
-            response.raise_for_status()
-            data = response.json()
+        translated = "".join(
+            part[0]
+            for part in data[0]
+            if part and part[0]
+        ).strip()
 
-            if provider_name == "MyMemory":
-                translated = data.get(
-                    "responseData",
-                    {},
-                ).get(
-                    "translatedText",
-                    "",
-                )
-                translated = html.unescape(translated).strip()
+        if translated and translated != text:
+            print(f"Перевод (Google): {translated}")
+            return translated
 
-            else:
-                translated = "".join(
-                    part[0]
-                    for part in data[0]
-                    if part and part[0]
-                ).strip()
+    except Exception as error:
+        print(f"Перевод (Google): ошибка — {error}")
 
-            if translated and translated != text:
-                print(
-                    f"Перевод ({provider_name}): {translated}"
-                )
-                return translated
-
-        except Exception as error:
-            print(
-                f"Перевод ({provider_name}): ошибка — {error}"
-            )
-
-    print(
-        f"Перевод не выполнен, оставляю оригинал: {text}"
-    )
+    print(f"Перевод не выполнен: {text}")
     return text
 
 
@@ -247,26 +233,49 @@ def get_entry_image(entry):
 def get_hook(item):
     title = item["title"].lower()
     summary = item["summary"].lower()
+    text = title + " " + summary
 
     hooks = [
         (
+            ["nintendo ds", "nds", "dualstation"],
+            "Старая Nintendo DS получает новую жизнь.",
+        ),
+        (
             ["game boy", "gameboy"],
-            "Классика Game Boy всё ещё жива.",
+            "Классика Game Boy всё ещё способна удивлять.",
+        ),
+        (
+            ["game boy color", "gbc"],
+            "Игры для Game Boy Color снова находят новое применение.",
         ),
         (
             ["steam deck"],
             "Steam Deck расширяет возможности портативного гейминга.",
         ),
         (
+            [
+                "ayn thor",
+                "retroid pocket",
+                "anbernic",
+                "miyoo",
+                "trimui",
+            ],
+            "Портативные консоли продолжают становиться интереснее.",
+        ),
+        (
+            ["handheld", "portable"],
+            "Портативный ретро-гейминг снова в центре внимания.",
+        ),
+        (
             ["nintendo"],
             "В мире Nintendo снова происходит интересное.",
         ),
         (
-            ["playstation", "sony"],
-            "Sony и ретро-игры — история продолжается.",
+            ["playstation", "ps1", "ps2", "sony"],
+            "Классика PlayStation продолжает жить в фанатских проектах.",
         ),
         (
-            ["sega", "genesis", "mega drive"],
+            ["sega", "genesis", "mega drive", "dreamcast"],
             "Sega не перестаёт радовать поклонников классики.",
         ),
         (
@@ -274,28 +283,24 @@ def get_hook(item):
             "Эмуляторы продолжают менять ретро-гейминг.",
         ),
         (
-            ["handheld", "portable"],
-            "Портативный ретро-гейминг снова в центре внимания.",
-        ),
-        (
-            ["console"],
-            "Ещё одна страница истории консолей.",
-        ),
-        (
-            ["mod", "modding"],
-            "Моддинг открывает старым устройствам новую жизнь.",
+            ["mod", "mods", "modding"],
+            "Моддинг открывает старым играм и устройствам новую жизнь.",
         ),
         (
             ["hack", "custom firmware", "cfw"],
             "Кастомные прошивки делают ретро-железо гибче.",
         ),
         (
-            ["restoration", "restored"],
-            "Реставрация возвращает классике вторую жизнь.",
+            ["fan-made", "fan made", "fan project"],
+            "Фанаты создают новые проекты по мотивам классики.",
         ),
         (
-            ["collection", "collector"],
-            "Коллекционирование ретро-игр — отдельное искусство.",
+            ["restoration", "restored", "repair"],
+            "Реставрация возвращает старой технике вторую жизнь.",
+        ),
+        (
+            ["kickstarter", "crowdfunding"],
+            "Новый ретро-проект ищет поддержку у сообщества.",
         ),
         (
             ["review"],
