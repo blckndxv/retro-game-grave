@@ -23,17 +23,25 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 GIT_EMAIL = "actions@github.com"
 GIT_NAME = "GitHub Actions"
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0 Safari/537.36"
+    )
+}
+
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as file:
-                data = json.load(file)
-                return set(data)
-        except Exception:
-            return set()
+    if not os.path.exists(STATE_FILE):
+        return set()
 
-    return set()
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as file:
+            return set(json.load(file))
+    except Exception as error:
+        print(f"Не удалось прочитать sent_links.json: {error}")
+        return set()
 
 
 def save_state(sent_links):
@@ -55,7 +63,6 @@ def commit_state():
         ["git", "config", "user.email", GIT_EMAIL],
         check=True,
     )
-
     subprocess.run(
         ["git", "add", "bot/sent_links.json"],
         check=True,
@@ -83,11 +90,12 @@ def get_chat_id():
             chat_id = file.read().strip()
 
             if chat_id:
+                print(f"Использую сохранённый chat_id: {chat_id}")
                 return chat_id
 
     response = requests.get(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-        timeout=30,
+        timeout=20,
     )
     response.raise_for_status()
 
@@ -102,6 +110,7 @@ def get_chat_id():
             with open(CHAT_ID_FILE, "w", encoding="utf-8") as file:
                 file.write(chat_id)
 
+            print(f"Найден chat_id: {chat_id}")
             return chat_id
 
     raise RuntimeError(
@@ -151,12 +160,11 @@ def translate_text(text):
             response = requests.get(
                 url,
                 params=params,
-                timeout=20,
+                timeout=15,
+                headers=HEADERS,
             )
             response.raise_for_status()
             data = response.json()
-
-            translated = ""
 
             if provider_name == "MyMemory":
                 translated = data.get(
@@ -181,13 +189,9 @@ def translate_text(text):
                 )
                 return translated
 
-            print(
-                f"{provider_name}: не смог перевести текст."
-            )
-
         except Exception as error:
             print(
-                f"{provider_name}: ошибка — {error}"
+                f"Перевод ({provider_name}): ошибка — {error}"
             )
 
     print(
@@ -196,7 +200,14 @@ def translate_text(text):
     return text
 
 
-def get_entry_text(entry):
+def clean_text(text):
+    text = html.unescape(text or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def get_entry_summary(entry):
     text = ""
 
     if entry.get("content"):
@@ -209,19 +220,17 @@ def get_entry_text(entry):
     if not text and entry.get("description"):
         text = entry.get("description", "")
 
-    text = html.unescape(text or "")
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
+    return clean_text(text)
 
 
 def get_entry_image(entry):
     for media in entry.get("media_content", []):
-        if media.get("url", "").lower().endswith(
+        url = media.get("url", "")
+
+        if url.lower().endswith(
             (".jpg", ".jpeg", ".png", ".webp")
         ):
-            return media["url"]
+            return url
 
     for media in entry.get("media_thumbnail", []):
         if media.get("url"):
@@ -239,7 +248,7 @@ def get_hook(item):
     title = item["title"].lower()
     summary = item["summary"].lower()
 
-    specific_hooks = [
+    hooks = [
         (
             ["game boy", "gameboy"],
             "Классика Game Boy всё ещё жива.",
@@ -253,7 +262,7 @@ def get_hook(item):
             "В мире Nintendo снова происходит интересное.",
         ),
         (
-            ["sony", "playstation"],
+            ["playstation", "sony"],
             "Sony и ретро-игры — история продолжается.",
         ),
         (
@@ -265,15 +274,15 @@ def get_hook(item):
             "Эмуляторы продолжают менять ретро-гейминг.",
         ),
         (
-            ["handheld", "handhelds", "portable"],
+            ["handheld", "portable"],
             "Портативный ретро-гейминг снова в центре внимания.",
         ),
         (
-            ["console", "consoles"],
+            ["console"],
             "Ещё одна страница истории консолей.",
         ),
         (
-            ["mod", "mods", "modding"],
+            ["mod", "modding"],
             "Моддинг открывает старым устройствам новую жизнь.",
         ),
         (
@@ -281,27 +290,27 @@ def get_hook(item):
             "Кастомные прошивки делают ретро-железо гибче.",
         ),
         (
-            ["restoration", "restore", "restored"],
+            ["restoration", "restored"],
             "Реставрация возвращает классике вторую жизнь.",
         ),
         (
-            ["collection", "collector", "collecting"],
+            ["collection", "collector"],
             "Коллекционирование ретро-игр — отдельное искусство.",
         ),
         (
-            ["review", "reviewed"],
+            ["review"],
             "Разбираемся, стоит ли это внимания.",
         ),
         (
-            ["guide", "how to", "tutorial"],
+            ["guide", "tutorial", "how to"],
             "Полезный материал для ретро-геймера.",
         ),
         (
-            ["update", "updated"],
+            ["update"],
             "Свежее обновление, которое может быть важным.",
         ),
         (
-            ["release", "released", "launched"],
+            ["release", "launched"],
             "Свежий релиз, на который стоит взглянуть.",
         ),
         (
@@ -309,11 +318,11 @@ def get_hook(item):
             "Хороший повод пополнить ретро-коллекцию.",
         ),
         (
-            ["hardware", "device", "console mod"],
+            ["hardware", "device"],
             "Железо для ретро-гейминга не стоит на месте.",
         ),
         (
-            ["controller", "gamepad", "joystick"],
+            ["controller", "gamepad"],
             "Геймпады и управление — важная часть ностальгии.",
         ),
         (
@@ -326,12 +335,12 @@ def get_hook(item):
         ),
     ]
 
-    for keywords, hook in specific_hooks:
+    for keywords, hook in hooks:
         for keyword in keywords:
             if keyword in title:
                 return hook
 
-    for keywords, hook in specific_hooks:
+    for keywords, hook in hooks:
         for keyword in keywords:
             if keyword in summary:
                 return hook
@@ -351,31 +360,48 @@ def collect_new_items(sent_links):
     items = []
 
     for source_name, feed_url in FEEDS:
+        print(f"Читаю RSS: {source_name}")
+
         try:
-            feed = feedparser.parse(feed_url)
+            response = requests.get(
+                feed_url,
+                timeout=20,
+                headers=HEADERS,
+            )
+            response.raise_for_status()
+
+            feed = feedparser.parse(response.content)
+
         except Exception as error:
-            print(f"Не удалось прочитать RSS {source_name}: {error}")
+            print(
+                f"Не удалось прочитать RSS {source_name}: {error}"
+            )
             continue
+
+        print(
+            f"RSS {source_name}: найдено {len(feed.entries)} записей."
+        )
 
         for entry in feed.entries:
             link = entry.get("link", "").strip()
-            title = html.unescape(entry.get("title", "")).strip()
+            title = html.unescape(
+                entry.get("title", "")
+            ).strip()
 
-            if not link or not title or link in sent_links:
+            if not link or not title:
                 continue
 
-            published = entry.get("published_parsed")
-            summary = get_entry_text(entry)
-            image_url = get_entry_image(entry)
+            if link in sent_links:
+                continue
 
             items.append(
                 {
                     "source": source_name,
                     "title": title,
                     "link": link,
-                    "summary": summary,
-                    "image_url": image_url,
-                    "published": published,
+                    "summary": get_entry_summary(entry),
+                    "image_url": get_entry_image(entry),
+                    "published": entry.get("published_parsed"),
                 }
             )
 
@@ -413,7 +439,11 @@ def build_message(items):
 
 def download_image(url):
     try:
-        response = requests.get(url, timeout=20)
+        response = requests.get(
+            url,
+            timeout=15,
+            headers=HEADERS,
+        )
         response.raise_for_status()
 
         image = Image.open(
@@ -423,7 +453,9 @@ def download_image(url):
         return image
 
     except Exception as error:
-        print(f"Не удалось скачать изображение: {error}")
+        print(
+            f"Не удалось скачать изображение: {error}"
+        )
         return None
 
 
@@ -476,7 +508,11 @@ def build_collage(items):
     background = (18, 18, 22)
     accent = (150, 90, 255)
 
-    canvas = Image.new("RGB", (width, height), background)
+    canvas = Image.new(
+        "RGB",
+        (width, height),
+        background,
+    )
     draw = ImageDraw.Draw(canvas)
 
     title_font = load_font(84)
@@ -488,14 +524,14 @@ def build_collage(items):
         (80, 70),
         "Retro Game Grave",
         font=title_font,
-        fill="white"
+        fill="white",
     )
 
     draw.text(
         (80, 240),
         "Retro Handhelds + Retro Dodo",
         font=subtitle_font,
-        fill=(190, 190, 200)
+        fill=(190, 190, 200),
     )
 
     images = []
@@ -515,7 +551,7 @@ def build_collage(items):
             (80, 650),
             "Сегодня нет изображений\nдля коллажа",
             font=subtitle_font,
-            fill="white"
+            fill="white",
         )
 
     else:
@@ -526,7 +562,7 @@ def build_collage(items):
             (80, 360),
             (620, 360),
             (80, 790),
-            (620, 790)
+            (620, 790),
         ]
 
         for index, (item, image) in enumerate(images):
@@ -535,7 +571,7 @@ def build_collage(items):
             card = crop_to_ratio(
                 image,
                 card_width,
-                card_height
+                card_height,
             )
 
             canvas.paste(card, (x, y))
@@ -545,24 +581,83 @@ def build_collage(items):
                     x,
                     y,
                     x + card_width,
-                    y + card_height
+                    y + card_height,
                 ],
                 outline=accent,
-                width=4
+                width=4,
             )
 
             draw.text(
                 (x + 16, y + card_height - 48),
                 item["source"],
                 font=label_font,
-                fill="white"
+                fill="white",
             )
 
     draw.text(
         (80, 1330),
         "только свежие новости из мира ретро",
         font=footer_font,
-        fill="white"
+        fill="white",
     )
 
     canvas.save(COLLAGE_FILE, "PNG")
+    print("Коллаж создан.")
+
+
+def send_digest(chat_id, items, message):
+    build_collage(items)
+
+    caption = message
+
+    while len(caption) > 1024 and len(items) > 1:
+        items.pop()
+        caption = build_message(items)
+
+    if len(caption) > 1024:
+        caption = caption[:1021].rstrip() + "..."
+
+    with open(COLLAGE_FILE, "rb") as photo:
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
+            data={
+                "chat_id": chat_id,
+                "caption": caption,
+                "parse_mode": "HTML",
+            },
+            files={"photo": photo},
+            timeout=60,
+        )
+
+    response.raise_for_status()
+    print("Дайджест отправлен в Telegram.")
+
+
+def main():
+    sent_links = load_state()
+    items = collect_new_items(sent_links)
+
+    if not items:
+        print("Новых публикаций нет. Сообщение не отправляется.")
+        return
+
+    print(f"Найдено новых новостей: {len(items)}")
+
+    chat_id = get_chat_id()
+    message = build_message(items)
+
+    send_digest(
+        chat_id,
+        items,
+        message,
+    )
+
+    sent_links.update(item["link"] for item in items)
+    save_state(sent_links)
+    commit_state()
+
+    print("Работа завершена успешно.")
+
+
+if __name__ == "__main__":
+    main()
