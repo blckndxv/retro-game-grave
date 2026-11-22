@@ -66,6 +66,7 @@ def commit_state():
         ["git", "config", "user.email", GIT_EMAIL],
         check=True,
     )
+
     subprocess.run(
         ["git", "add", "bot/sent_links.json"],
         check=True,
@@ -84,7 +85,73 @@ def commit_state():
         ["git", "commit", "-m", "Update sent links"],
         check=True,
     )
-    subprocess.run(["git", "push"], check=True)
+
+    print("Синхронизирую репозиторий перед отправкой...")
+
+    pull_result = subprocess.run(
+        [
+            "git",
+            "pull",
+            "--rebase",
+            "origin",
+            "main",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if pull_result.returncode != 0:
+        print("Не удалось синхронизировать репозиторий:")
+        print(pull_result.stdout)
+        print(pull_result.stderr)
+
+    push_result = subprocess.run(
+        ["git", "push"],
+        capture_output=True,
+        text=True,
+    )
+
+    if push_result.returncode == 0:
+        print("Отправленные ссылки сохранены в репозитории.")
+        return
+
+    print("Первая попытка git push не удалась:")
+    print(push_result.stdout)
+    print(push_result.stderr)
+
+    print("Пробую синхронизировать и отправить ещё раз...")
+
+    subprocess.run(
+        [
+            "git",
+            "pull",
+            "--rebase",
+            "origin",
+            "main",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    retry_result = subprocess.run(
+        ["git", "push"],
+        capture_output=True,
+        text=True,
+    )
+
+    if retry_result.returncode == 0:
+        print("Отправленные ссылки сохранены в репозитории.")
+        return
+
+    print("Не удалось сохранить sent_links.json в репозитории:")
+    print(retry_result.stdout)
+    print(retry_result.stderr)
+
+    raise RuntimeError(
+        "git push не удалось выполнить после повторной попытки. "
+        "Дайджест уже отправлен, но список отправленных ссылок "
+        "не был сохранён."
+    )
 
 
 def get_chat_id():
