@@ -8,6 +8,7 @@ import subprocess
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 
 FEEDS = [
@@ -42,6 +43,8 @@ def load_state():
     except Exception as error:
         print(f"Не удалось прочитать sent_links.json: {error}")
         return set()
+
+    return set()
 
 
 def save_state(sent_links):
@@ -130,7 +133,7 @@ def translate_text(text):
                 "q": text,
                 "langpair": "en|ru",
             },
-            timeout=15,
+            timeout=20,
             headers=HEADERS,
         )
         response.raise_for_status()
@@ -162,7 +165,7 @@ def translate_text(text):
                 "dt": "t",
                 "q": text,
             },
-            timeout=15,
+            timeout=20,
             headers=HEADERS,
         )
         response.raise_for_status()
@@ -229,154 +232,277 @@ def get_entry_image(entry):
     return None
 
 
-def get_hook(item):
-    title = item["title"].lower()
-    summary = item["summary"].lower()
-    text = title + " " + summary
+def get_article_text_jina(url):
+    jina_url = "https://r.jina.ai/" + url
 
-    hooks = [
-        (
-            ["nintendo ds", "nds", "dualstation"],
-            "Старая Nintendo DS получает новую жизнь.",
-        ),
-        (
-            ["game boy", "gameboy"],
-            "Классика Game Boy всё ещё способна удивлять.",
-        ),
-        (
-            ["game boy color", "gbc"],
-            "Игры для Game Boy Color снова находят новое применение.",
-        ),
-        (
-            ["steam deck"],
-            "Steam Deck расширяет возможности портативного гейминга.",
-        ),
-        (
+    try:
+        response = requests.get(
+            jina_url,
+            timeout=35,
+            headers=HEADERS,
+        )
+
+        if not response.ok:
+            print(
+                f"Jina Reader вернул статус {response.status_code}: {url}"
+            )
+            return ""
+
+        text = response.text
+
+        if "Markdown Content:" in text:
+            text = text.split(
+                "Markdown Content:",
+                1,
+            )[1]
+
+        text = clean_text(text)
+
+        if len(text) > 400:
+            print(f"Текст статьи получен через Jina Reader: {url}")
+            return text
+
+        print(f"Jina Reader вернул слишком мало текста: {url}")
+
+    except Exception as error:
+        print(f"Jina Reader: ошибка — {error}")
+
+    return ""
+
+
+def get_article_text_direct(url):
+    try:
+        response = requests.get(
+            url,
+            timeout=25,
+            headers=HEADERS,
+        )
+        response.raise_for_status()
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
+
+        for tag in soup(
             [
-                "ayn thor",
-                "retroid pocket",
-                "anbernic",
-                "miyoo",
-                "trimui",
-            ],
-            "Портативные консоли продолжают становиться интереснее.",
-        ),
-        (
-            ["handheld", "portable"],
-            "Портативный ретро-гейминг снова в центре внимания.",
-        ),
-        (
-            ["nintendo"],
-            "В мире Nintendo снова происходит интересное.",
-        ),
-        (
-            ["playstation", "ps1", "ps2", "sony"],
-            "Классика PlayStation продолжает жить в фанатских проектах.",
-        ),
-        (
-            ["sega", "genesis", "mega drive", "dreamcast"],
-            "Sega не перестаёт радовать поклонников классики.",
-        ),
-        (
-            ["emulator", "emulation"],
-            "Эмуляторы продолжают менять ретро-гейминг.",
-        ),
-        (
-            ["mod", "mods", "modding"],
-            "Моддинг открывает старым играм и устройствам новую жизнь.",
-        ),
-        (
-            ["hack", "custom firmware", "cfw"],
-            "Кастомные прошивки делают ретро-железо гибче.",
-        ),
-        (
-            ["fan-made", "fan made", "fan project"],
-            "Фанаты создают новые проекты по мотивам классики.",
-        ),
-        (
-            ["restoration", "restored", "repair"],
-            "Реставрация возвращает старой технике вторую жизнь.",
-        ),
-        (
-            ["kickstarter", "crowdfunding"],
-            "Новый ретро-проект ищет поддержку у сообщества.",
-        ),
-        (
-            ["review"],
-            "Разбираемся, стоит ли это внимания.",
-        ),
-        (
-            ["guide", "tutorial", "how to"],
-            "Полезный материал для ретро-геймера.",
-        ),
-        (
-            ["update"],
-            "Свежее обновление, которое может быть важным.",
-        ),
-        (
-            ["release", "launched"],
-            "Свежий релиз, на который стоит взглянуть.",
-        ),
-        (
-            ["sale", "discount", "deal"],
-            "Хороший повод пополнить ретро-коллекцию.",
-        ),
-        (
-            ["hardware", "device"],
-            "Железо для ретро-гейминга не стоит на месте.",
-        ),
-        (
-            ["controller", "gamepad"],
-            "Геймпады и управление — важная часть ностальгии.",
-        ),
-        (
-            ["android"],
-            "Android-гейминг становится всё интереснее.",
-        ),
-        (
-            ["linux"],
-            "Linux снова доказывает свою силу в играх.",
-        ),
+                "script",
+                "style",
+                "nav",
+                "header",
+                "footer",
+                "aside",
+                "form",
+                "button",
+                "noscript",
+            ]
+        ):
+            tag.decompose()
+
+        article = (
+            soup.find("article")
+            or soup.find("main")
+            or soup.find(
+                "div",
+                class_=re.compile(
+                    r"(entry-content|article-content|post-content|content)",
+                    re.IGNORECASE,
+                ),
+            )
+        )
+
+        if article:
+            text = article.get_text(" ", strip=True)
+        else:
+            text = soup.get_text(" ", strip=True)
+
+        text = clean_text(text)
+
+        if len(text) > 400:
+            print(f"Текст статьи получен напрямую: {url}")
+            return text
+
+        print(f"Прямое чтение дало слишком мало текста: {url}")
+
+    except Exception as error:
+        print(f"Прямое чтение статьи: ошибка — {error}")
+
+    return ""
+
+
+def get_article_text(url):
+    article_text = get_article_text_jina(url)
+
+    if article_text:
+        return article_text
+
+    return get_article_text_direct(url)
+
+
+def get_best_sentence(article_text):
+    if not article_text:
+        return ""
+
+    sentences = re.split(
+        r"(?<=[.!?])\s+",
+        article_text,
+    )
+
+    good_sentences = []
+
+    for index, sentence in enumerate(sentences):
+        sentence = sentence.strip()
+
+        if len(sentence) < 90:
+            continue
+
+        if len(sentence) > 320:
+            continue
+
+        if sentence.count(" ") < 12:
+            continue
+
+        blocked_words = [
+            "cookie",
+            "cookies",
+            "subscribe",
+            "newsletter",
+            "comment",
+            "comments",
+            "discord",
+            "affiliate",
+            "privacy",
+            "advertisement",
+            "sign up",
+            "follow us",
+            "share this",
+            "read more",
+            "related posts",
+            "leave a reply",
+            "copyright",
+        ]
+
+        if any(
+            word in sentence.lower()
+            for word in blocked_words
+        ):
+            continue
+
+        good_sentences.append(
+            (
+                index,
+                sentence,
+            )
+        )
+
+    if not good_sentences:
+        return ""
+
+    strong_words = [
+        "will offer",
+        "offers",
+        "offering",
+        "features",
+        "featuring",
+        "introduces",
+        "introducing",
+        "announced",
+        "announcing",
+        "revealed",
+        "revealing",
+        "showcases",
+        "showcasing",
+        "launch",
+        "launching",
+        "release",
+        "releasing",
+        "available",
+        "adds",
+        "adding",
+        "supports",
+        "supporting",
+        "optimized",
+        "designed",
+        "improved",
+        "improving",
+        "brings",
+        "bringing",
+        "includes",
+        "including",
+        "allows",
+        "enables",
+        "provides",
+        "providing",
+        "deliver",
+        "delivering",
     ]
 
-    for keywords, hook in hooks:
-        for keyword in keywords:
-            if keyword in title:
-                return hook
+    scored_sentences = []
 
-    for keywords, hook in hooks:
-        for keyword in keywords:
-            if keyword in summary:
-                return hook
+    for index, sentence in good_sentences:
+        lower_sentence = sentence.lower()
+        score = 0
 
-    neutral_hooks = [
-        "Свежая новость из мира ретро-гейминга.",
-        "Интересное событие для поклонников классики.",
-        "Ещё одна новость из мира старых игр и консолей.",
-        "Ретро-гейминг продолжает удивлять.",
-        "Новая история из мира игровых классиков.",
-    ]
+        for word in strong_words:
+            if word in lower_sentence:
+                score += 3
 
-    return random.choice(neutral_hooks)
+        if re.search(
+            r"\d",
+            sentence,
+        ):
+            score += 1
+
+        if 120 <= len(sentence) <= 260:
+            score += 3
+
+        if index < 12:
+            score += 2
+
+        scored_sentences.append(
+            (
+                score,
+                index,
+                sentence,
+            )
+        )
+
+    scored_sentences.sort(
+        key=lambda item: (
+            item[0],
+            -item[1],
+        ),
+        reverse=True,
+    )
+
+    return scored_sentences[0][2]
 
 
-def get_intro():
-    intros = [
-        "Подборка свежих новостей",
-        "Новая подборка ретро-новостей",
-        "А вот и подборка новейших ретро-новостей",
-        "Свежие новости из мира ретро-гейминга",
-        "Главные ретро-новости этой подборки",
-        "Что нового в мире ретро-игр",
-        "Свежая порция ретро-новостей",
-        "Новости ретро-гейминга",
-        "Самое интересное из мира ретро",
-        "Новые события в ретро-гейминге",
-        "Подборка актуальных ретро-новостей",
-        "Ретро-новости, которые стоит увидеть",
-    ]
+def get_hook(item):
+    article_text = get_article_text(item["link"])
 
-    return random.choice(intros)
+    best_sentence = get_best_sentence(article_text)
+
+    if best_sentence:
+        print("Выбрана сильная фраза из статьи:")
+        print(best_sentence)
+
+        russian_hook = translate_text(best_sentence)
+
+        if russian_hook:
+            return russian_hook
+
+    summary = item.get("summary", "")
+
+    if summary:
+        best_sentence = get_best_sentence(summary)
+
+        if best_sentence:
+            print("Использую сильную фразу из RSS-описания.")
+            return translate_text(best_sentence)
+
+    print("Подходящая фраза не найдена.")
+    return ""
 
 
 def collect_new_items(sent_links):
@@ -451,15 +577,41 @@ def build_message(items):
         safe_link = html.escape(item["link"], quote=True)
         hook = get_hook(item)
 
-        lines.append(
-            f'• <b><a href="{safe_link}">{safe_title}</a></b>\n{hook}'
-        )
+        if hook:
+            lines.append(
+                f'• <b><a href="{safe_link}">{safe_title}</a></b>\n{hook}'
+            )
+
+        else:
+            lines.append(
+                f'• <b><a href="{safe_link}">{safe_title}</a></b>'
+            )
+
         lines.append("")
 
     while lines and lines[-1] == "":
         lines.pop()
 
     return "\n".join(lines)
+
+
+def get_intro():
+    intros = [
+        "Подборка свежих новостей",
+        "Новая подборка ретро-новостей",
+        "А вот и подборка новейших ретро-новостей",
+        "Свежие новости из мира ретро-гейминга",
+        "Главные ретро-новости этой подборки",
+        "Что нового в мире ретро-игр",
+        "Свежая порция ретро-новостей",
+        "Новости ретро-гейминга",
+        "Самое интересное из мира ретро",
+        "Новые события в ретро-гейминге",
+        "Подборка актуальных ретро-новостей",
+        "Ретро-новости, которые стоит увидеть",
+    ]
+
+    return random.choice(intros)
 
 
 def download_image(url):
