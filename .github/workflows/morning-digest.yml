@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install feedparser requests Pillow
+          pip install feedparser requests Pillow beautifulsoup4
 
       - name: Run digest
         env:
