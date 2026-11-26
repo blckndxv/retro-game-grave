@@ -423,10 +423,10 @@ def get_best_sentence(article_text):
         if len(sentence) < 90:
             continue
 
-        if len(sentence) > 320:
+        if len(sentence) > 220:
             continue
 
-        if sentence.count(" ") < 12:
+        if sentence.count(" ") < 10:
             continue
 
         blocked_words = [
@@ -447,11 +447,35 @@ def get_best_sentence(article_text):
             "related posts",
             "leave a reply",
             "copyright",
+            "like our website",
+            "support us",
+            "becoming a member",
+            "tipping us",
         ]
 
         if any(
             word in sentence.lower()
             for word in blocked_words
+        ):
+            continue
+
+        opinion_words = [
+            "i loved",
+            "i like",
+            "i think",
+            "i do think",
+            "i admit",
+            "i would",
+            "i'm putting",
+            "made me a",
+            "my favourite",
+            "my favorite",
+            "in my opinion",
+        ]
+
+        if any(
+            word in sentence.lower()
+            for word in opinion_words
         ):
             continue
 
@@ -479,6 +503,8 @@ def get_best_sentence(article_text):
         "revealing",
         "showcases",
         "showcasing",
+        "teased",
+        "tease",
         "launch",
         "launching",
         "release",
@@ -520,8 +546,11 @@ def get_best_sentence(article_text):
         ):
             score += 1
 
-        if 120 <= len(sentence) <= 260:
-            score += 3
+        if 110 <= len(sentence) <= 190:
+            score += 4
+
+        if 190 < len(sentence) <= 220:
+            score += 1
 
         if index < 12:
             score += 2
@@ -545,7 +574,28 @@ def get_best_sentence(article_text):
     return scored_sentences[0][2]
 
 
+def shorten_hook(text, limit=180):
+    if not text:
+        return ""
+
+    text = text.strip()
+
+    if len(text) <= limit:
+        return text
+
+    cut_text = text[:limit]
+    last_space = cut_text.rfind(" ")
+
+    if last_space > 80:
+        cut_text = cut_text[:last_space]
+
+    return cut_text.rstrip(" ,.;:-") + "…"
+
+
 def get_hook(item):
+    if item.get("hook_ru"):
+        return item["hook_ru"]
+
     article_text = get_article_text(item["link"])
 
     best_sentence = get_best_sentence(article_text)
@@ -557,7 +607,8 @@ def get_hook(item):
         russian_hook = translate_text(best_sentence)
 
         if russian_hook:
-            return russian_hook
+            item["hook_ru"] = shorten_hook(russian_hook)
+            return item["hook_ru"]
 
     summary = item.get("summary", "")
 
@@ -566,7 +617,11 @@ def get_hook(item):
 
         if best_sentence:
             print("Использую сильную фразу из RSS-описания.")
-            return translate_text(best_sentence)
+            russian_hook = translate_text(best_sentence)
+
+            if russian_hook:
+                item["hook_ru"] = shorten_hook(russian_hook)
+                return item["hook_ru"]
 
     print("Подходящая фраза не найдена.")
     return ""
@@ -639,7 +694,10 @@ def build_message(items):
     ]
 
     for item in items:
-        russian_title = translate_text(item["title"])
+        if not item.get("title_ru"):
+            item["title_ru"] = translate_text(item["title"])
+
+        russian_title = item["title_ru"]
         safe_title = html.escape(russian_title)
         safe_link = html.escape(item["link"], quote=True)
         hook = get_hook(item)
