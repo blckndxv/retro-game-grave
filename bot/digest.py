@@ -17,7 +17,7 @@ FEEDS = [
 ]
 
 STATE_FILE = "bot/sent_links.json"
-CHAT_ID_FILE = "bot/chat_id.txt"
+CHAT_IDS_FILE = "bot/chat_ids.txt"
 COLLAGE_FILE = "bot/collage.png"
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -154,14 +154,16 @@ def commit_state():
     )
 
 
-def get_chat_id():
-    if os.path.exists(CHAT_ID_FILE):
-        with open(CHAT_ID_FILE, "r", encoding="utf-8") as file:
-            chat_id = file.read().strip()
+def get_chat_ids():
+    chat_ids = []
 
-            if chat_id:
-                print(f"Использую сохранённый chat_id: {chat_id}")
-                return chat_id
+    if os.path.exists(CHAT_IDS_FILE):
+        with open(CHAT_IDS_FILE, "r", encoding="utf-8") as file:
+            for line in file:
+                chat_id = line.strip()
+
+                if chat_id and chat_id not in chat_ids:
+                    chat_ids.append(chat_id)
 
     response = requests.get(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
@@ -171,22 +173,40 @@ def get_chat_id():
 
     updates = response.json().get("result", [])
 
-    for update in reversed(updates):
+    new_chat_ids = []
+
+    for update in updates:
         message = update.get("message") or update.get("channel_post")
 
-        if message:
-            chat_id = str(message["chat"]["id"])
+        if not message:
+            continue
 
-            with open(CHAT_ID_FILE, "w", encoding="utf-8") as file:
-                file.write(chat_id)
+        text = message.get("text", "")
 
-            print(f"Найден chat_id: {chat_id}")
-            return chat_id
+        if text.strip().lower() != "/start":
+            continue
 
-    raise RuntimeError(
-        "Не удалось определить chat_id. "
-        "Открой бота в Telegram, отправь /start и запусти workflow снова."
-    )
+        chat_id = str(message["chat"]["id"])
+
+        if chat_id not in chat_ids:
+            chat_ids.append(chat_id)
+            new_chat_ids.append(chat_id)
+
+    if new_chat_ids:
+        with open(CHAT_IDS_FILE, "w", encoding="utf-8") as file:
+            file.write("\n".join(chat_ids))
+
+        print(f"Добавлены новые подписчики: {', '.join(new_chat_ids)}")
+
+    if not chat_ids:
+        raise RuntimeError(
+            "Не найдено ни одного подписчика. "
+            "Попроси пользователей отправить боту /start, "
+            "затем запусти workflow снова."
+        )
+
+    print(f"Найдено подписчиков: {len(chat_ids)}")
+    return chat_ids
 
 
 def translate_text(text):
@@ -907,7 +927,7 @@ def build_collage(items):
     print("Коллаж создан.")
 
 
-def send_digest(chat_id, items, message):
+def send_digest(chat_ids, items, message):
     build_collage(items)
 
     caption = message
@@ -919,20 +939,37 @@ def send_digest(chat_id, items, message):
     if len(caption) > 1024:
         caption = caption[:1021].rstrip() + "..."
 
-    with open(COLLAGE_FILE, "rb") as photo:
-        response = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
-            data={
-                "chat_id": chat_id,
-                "caption": caption,
-                "parse_mode": "HTML",
-            },
-            files={"photo": photo},
-            timeout=60,
+    sent_count = 0
+
+    for chat_id in chat_ids:
+        try:
+            with open(COLLAGE_FILE, "rb") as photo:
+                response = requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
+                    data={
+                        "chat_id": chat_id,
+                        "caption": caption,
+                        "parse_mode": "HTML",
+                    },
+                    files={"photo": photo},
+                    timeout=60,
+                )
+
+            response.raise_for_status()
+            sent_count += 1
+            print(f"Дайджест отправлен: {chat_id}")
+
+        except Exception as error:
+            print(
+                f"Не удалось отправить дайджест {chat_id}: {error}"
+            )
+
+    if sent_count == 0:
+        raise RuntimeError(
+            "Дайджест не удалось отправить ни одному подписчику."
         )
 
-    response.raise_for_status()
-    print("Дайджест отправлен в Telegram.")
+    print(f"Дайджест отправлен {sent_count} подписчикам.")
 
 
 def main():
@@ -945,11 +982,11 @@ def main():
 
     print(f"Найдено новых новостей: {len(items)}")
 
-    chat_id = get_chat_id()
+    chat_ids = get_chat_ids()
     message = build_message(items)
 
     send_digest(
-        chat_id,
+        chat_ids,
         items,
         message,
     )
